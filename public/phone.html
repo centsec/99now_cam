@@ -116,11 +116,29 @@
 <script>
 const ICE_CONFIG = {
   iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    // Add TURN credentials (metered.ca free tier) here for cellular reliability:
-    // { urls: 'turn:standard.relay.metered.ca:80', username: 'YOUR_USER', credential: 'YOUR_PASS' },
-    // { urls: 'turn:standard.relay.metered.ca:443', username: 'YOUR_USER', credential: 'YOUR_PASS' },
+      {
+        urls: "stun:stun.relay.metered.ca:80",
+      },
+      {
+        urls: "turn:global.relay.metered.ca:80",
+        username: "ac6c8326aabb3592e745da90",
+        credential: "w4s8gmFdz4ePiqUQ",
+      },
+      {
+        urls: "turn:global.relay.metered.ca:80?transport=tcp",
+        username: "ac6c8326aabb3592e745da90",
+        credential: "w4s8gmFdz4ePiqUQ",
+      },
+      {
+        urls: "turn:global.relay.metered.ca:443",
+        username: "ac6c8326aabb3592e745da90",
+        credential: "w4s8gmFdz4ePiqUQ",
+      },
+      {
+        urls: "turns:global.relay.metered.ca:443?transport=tcp",
+        username: "ac6c8326aabb3592e745da90",
+        credential: "w4s8gmFdz4ePiqUQ",
+      },
   ],
 };
 
