@@ -65,7 +65,14 @@ riskFlags[]: real risks the handler should be aware of (child involved, weapon o
 
 handoverBrief: 2–3 sentence professional summary suitable to hand to the responding unit. No AI hedging language. Plain, factual, actionable.
 
-Never diagnose specific medical conditions. Never speculate beyond the transcript. If the transcript is empty or single-line, return low confidences and defer with a follow-up question set.`;
+Never diagnose specific medical conditions. Never speculate beyond the transcript. If the transcript is empty or single-line, return low confidences and defer with a follow-up question set.
+
+AUDIO SIGNALS
+Alongside the transcript you may be given real-time audio signals detected in the caller's voice: screaming/panic, extended silence, loud background noise, etc. Weight these strongly — vocal tone and environmental audio often reveal what words alone don't. Guidance:
+- Extended silence (5s+) from a previously vocal caller is a serious sign of deterioration.
+- Screaming or panicked vocalization elevates urgency and typically means Category 1.
+- Loud background noise may indicate ongoing violence, an active fire, an RTC in progress, or a hazardous environment.
+Reflect these signals in your reasoning, priority, riskFlags, and the voiceAnalysis field.`;
 
 const AI_OUTPUT_SCHEMA = {
   type: 'object',
@@ -99,16 +106,32 @@ const AI_OUTPUT_SCHEMA = {
     preArrivalInstructions: { type: 'array', items: { type: 'string' } },
     riskFlags: { type: 'array', items: { type: 'string' } },
     handoverBrief: { type: 'string' },
+    voiceAnalysis: {
+      type: 'object',
+      properties: {
+        distressLevel: { type: 'string', enum: ['none', 'mild', 'moderate', 'severe'] },
+        observations: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['distressLevel', 'observations'],
+      additionalProperties: false,
+    },
   },
-  required: ['services', 'priority', 'followUpQuestions', 'preArrivalInstructions', 'riskFlags', 'handoverBrief'],
+  required: ['services', 'priority', 'followUpQuestions', 'preArrivalInstructions', 'riskFlags', 'handoverBrief', 'voiceAnalysis'],
   additionalProperties: false,
 };
 
-async function analyseWithClaude({ transcript, geo }) {
+async function analyseWithClaude({ transcript, geo, audioEvents }) {
+  const audioSection = (Array.isArray(audioEvents) && audioEvents.length)
+    ? `\nAudio signals detected during the call (chronological):\n` +
+      audioEvents.slice(-20).map((e) => `- ${e.description || e.type}${e.time ? ' (' + e.time + ')' : ''}`).join('\n') +
+      `\n`
+    : `\n(No distinct audio signals detected yet.)\n`;
+
   const userMessage =
-    `Live 999 call transcript so far:\n\n${transcript || '(no transcript yet)'}\n\n` +
-    (geo ? `Caller GPS: lat ${geo.lat.toFixed(5)}, lon ${geo.lon.toFixed(5)} (±${Math.round(geo.accuracy || 0)}m)\n\n` : '') +
-    `Produce the structured triage assessment now.`;
+    `Live 999 call transcript so far:\n\n${transcript || '(no transcript yet)'}\n` +
+    audioSection +
+    (geo ? `\nCaller GPS: lat ${geo.lat.toFixed(5)}, lon ${geo.lon.toFixed(5)} (±${Math.round(geo.accuracy || 0)}m)\n` : '') +
+    `\nProduce the structured triage assessment now.`;
 
   const response = await claude.messages.create({
     model: 'claude-sonnet-5',

@@ -134,6 +134,16 @@
   /* Service card indicator/reasoning tweaks for Claude output */
   .service .reasoning { font-size: 12px; color: var(--muted); line-height: 1.35; }
 
+  /* Voice analysis */
+  .voice-analysis { display: flex; flex-direction: column; gap: 8px; }
+  .voice-header { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  .voice-header .label { color: var(--muted); }
+  .distress { padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
+  .distress.none { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
+  .distress.mild { background: #4a3f00; color: #ffdf6b; }
+  .distress.moderate { background: #5a2600; color: #ffb774; }
+  .distress.severe { background: var(--accent); color: #fff; animation: pulse 1.2s infinite; }
+
   /* Right: video preview + handover */
   .right-col {
     grid-column: 3; grid-row: 1;
@@ -272,6 +282,17 @@
       <div id="ai-risks" class="risk-flags">
         <span class="risk empty">none flagged</span>
       </div>
+
+      <h3 style="margin-top:6px;">Voice Analysis</h3>
+      <div class="voice-analysis">
+        <div class="voice-header">
+          <span class="label">Caller distress level:</span>
+          <span id="ai-distress" class="distress none">—</span>
+        </div>
+        <ul id="ai-voice-obs" class="ai-list">
+          <li class="ai-empty">No distinct audio signals detected.</li>
+        </ul>
+      </div>
     </div>
   </section>
 
@@ -353,6 +374,7 @@ let state = {
   incidentDefault: 'Road traffic collision',
   geo: null,
   transcript: [], // {who, text, kind, time}
+  audioEvents: [], // {type, description, time}
   callStart: null,
 };
 let unitStatuses = {}; // id -> 'standby' | 'dispatched' | 'on-scene'
@@ -407,6 +429,7 @@ async function runAiAnalysis() {
       body: JSON.stringify({
         transcript: transcriptText,
         geo: state.geo,
+        audioEvents: state.audioEvents,
       }),
     });
     if (!r.ok) {
@@ -417,6 +440,10 @@ async function runAiAnalysis() {
     claudeResult = data.result;
     setAiMode('claude');
     renderAI();
+    // Notify dashboard so it can broadcast to any connected responders
+    if (dashboard) {
+      try { dashboard.postMessage({ type: 'ai-result', payload: claudeResult }, location.origin); } catch {}
+    }
   } catch (err) {
     console.warn('AI analysis failed:', err.message);
     claudeResult = null;
@@ -516,6 +543,21 @@ function renderClaudeResult() {
     });
   } else {
     const span = document.createElement('span'); span.className = 'risk empty'; span.textContent = 'none flagged'; rf.appendChild(span);
+  }
+
+  // Voice analysis
+  const va = r.voiceAnalysis || { distressLevel: 'none', observations: [] };
+  const dl = document.getElementById('ai-distress');
+  dl.className = 'distress ' + (va.distressLevel || 'none');
+  dl.textContent = va.distressLevel || 'none';
+  const vo = document.getElementById('ai-voice-obs');
+  vo.innerHTML = '';
+  if (va.observations && va.observations.length) {
+    va.observations.forEach(obs => {
+      const li = document.createElement('li'); li.textContent = obs; vo.appendChild(li);
+    });
+  } else {
+    const li = document.createElement('li'); li.className = 'ai-empty'; li.textContent = 'No distinct audio signals detected.'; vo.appendChild(li);
   }
 
   // Handover brief (only overwrite if the user hasn't edited it)
@@ -739,12 +781,17 @@ window.addEventListener('message', (e) => {
   const m = e.data;
   if (m.type === 'state') {
     Object.assign(state, m.payload);
+    if (!Array.isArray(state.audioEvents)) state.audioEvents = [];
     applyState();
     if (state.transcript && state.transcript.length) scheduleAiAnalysis();
   } else if (m.type === 'transcript-add') {
     state.transcript.push(m.payload);
     renderAI();
     scheduleAiAnalysis();
+  } else if (m.type === 'audio-event') {
+    state.audioEvents.push(m.payload);
+    if (state.audioEvents.length > 40) state.audioEvents.shift();
+    scheduleAiAnalysis(); // re-analyse when a distress signal arrives
   } else if (m.type === 'geo') {
     state.geo = m.payload;
     applyState();

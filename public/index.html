@@ -425,6 +425,8 @@ const responderPcs = new Map(); // responderId -> RTCPeerConnection
 const callerProfile = { caller: 'Mobile · +44 7700 900 471', incidentDefault: 'Road traffic collision' };
 let currentGeo = null;
 const transcriptLog = [];
+const audioEventsLog = [];    // detected voice/audio signals (screaming, silence, etc.)
+let latestAiResult = null;    // cached Claude output for pushing to new responders
 
 function setStatus(text, kind) {
   statusText.textContent = text;
@@ -597,6 +599,14 @@ function connectWs() {
       pushToDispatch({ type: 'geo', payload: currentGeo });
       return;
     }
+    if (msg.type === 'audio-event') {
+      // Distress / voice signal detected on the caller's phone
+      audioEventsLog.push(msg.event);
+      if (audioEventsLog.length > 40) audioEventsLog.shift();
+      addMessage({ kind: 'system', text: `Audio signal: ${msg.event.description}` });
+      pushToDispatch({ type: 'audio-event', payload: msg.event });
+      return;
+    }
   };
 }
 
@@ -622,6 +632,11 @@ async function createResponderForwarder(id, label) {
     // Defer — pc.ontrack will attach tracks and offer once the phone stream arrives
     rpc._pending = true;
   }
+
+  // Send the most recent AI analysis so the responder isn't blank until the next refresh
+  if (latestAiResult) {
+    send({ type: 'ai-update', payload: latestAiResult, to: id });
+  }
 }
 
 async function sendOfferToResponder(id, rpc) {
@@ -642,6 +657,13 @@ function pushToDispatch(msg) {
 window.addEventListener('message', (e) => {
   if (e.origin !== location.origin) return;
   if (e.data?.type === 'dispatch-ready') sendFullStateToDispatch();
+  if (e.data?.type === 'ai-result') {
+    // Dispatch got a fresh Claude analysis — cache and broadcast to responders
+    latestAiResult = e.data.payload;
+    responderPcs.forEach((_, id) => {
+      send({ type: 'ai-update', payload: latestAiResult, to: id });
+    });
+  }
 });
 function sendFullStateToDispatch() {
   pushToDispatch({ type: 'state', payload: {
@@ -649,6 +671,7 @@ function sendFullStateToDispatch() {
     incidentDefault: callerProfile.incidentDefault,
     geo: currentGeo,
     transcript: transcriptLog.slice(),
+    audioEvents: audioEventsLog.slice(),
     callStart,
   }});
   if (callStart) pushToDispatch({ type: 'call-start', payload: { t: callStart } });

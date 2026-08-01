@@ -57,6 +57,28 @@
   .info-strip .item .label { font-size: 11px; color: #8b94a3; text-transform: uppercase; letter-spacing: 0.8px; }
   .info-strip .item .value { font-size: 14px; }
   .info-strip .item .value.severity { background: #c8102e; padding: 2px 8px; border-radius: 4px; display: inline-block; font-weight: 700; font-size: 12px; letter-spacing: 0.5px; }
+
+  /* AI insight panel */
+  .ai-panel {
+    padding: 12px 16px; background: #0f1218; border-top: 1px solid #232830;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  }
+  .ai-panel .col { display: flex; flex-direction: column; gap: 8px; }
+  .ai-panel h4 {
+    margin: 0; font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1.2px; color: #8b94a3;
+  }
+  .ai-panel .brief { font-size: 13px; line-height: 1.4; color: #e7ecf2; }
+  .ai-panel .risks { display: flex; flex-wrap: wrap; gap: 4px; }
+  .ai-panel .risk-chip { background: #c8102e; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+  .ai-panel .risk-empty { background: #1b1f26; color: #8b94a3; padding: 2px 8px; border-radius: 4px; font-size: 11px; border: 1px solid #232830; }
+  .ai-panel .distress-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .ai-panel .distress-badge { padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
+  .ai-panel .distress-none { background: #1b1f26; color: #8b94a3; border: 1px solid #232830; }
+  .ai-panel .distress-mild { background: #4a3f00; color: #ffdf6b; }
+  .ai-panel .distress-moderate { background: #5a2600; color: #ffb774; }
+  .ai-panel .distress-severe { background: #c8102e; color: #fff; animation: pulse 1.2s infinite; }
+  .ai-panel .waiting { color: #8b94a3; font-size: 12px; font-style: italic; }
 </style>
 </head>
 <body>
@@ -92,6 +114,24 @@
   <div class="item">
     <div class="label">Dispatched</div>
     <div class="value" id="dispatched-at">—</div>
+  </div>
+</div>
+
+<div class="ai-panel" id="ai-panel">
+  <div class="col" style="grid-column: 1 / span 2;">
+    <h4>Dispatch Brief (live AI)</h4>
+    <div id="ai-brief" class="waiting">Awaiting AI assessment from 99NOW dispatch…</div>
+  </div>
+  <div class="col">
+    <h4>Risk Flags</h4>
+    <div id="ai-risks" class="risks"><span class="risk-empty">none flagged</span></div>
+  </div>
+  <div class="col">
+    <h4>Voice Analysis</h4>
+    <div id="ai-distress-row" class="distress-row">
+      <span>Caller distress:</span>
+      <span id="ai-distress" class="distress-badge distress-none">—</span>
+    </div>
   </div>
 </div>
 
@@ -202,7 +242,41 @@ ws.onmessage = async (e) => {
     placeholder.style.display = 'grid';
     placeholder.textContent = 'Feed ended by dispatcher.';
   }
+  if (msg.type === 'ai-update') {
+    renderAiInsights(msg.payload);
+  }
 };
+
+function renderAiInsights(r) {
+  if (!r) return;
+
+  // Handover brief — professionally worded 2-3 sentence summary from Claude
+  const brief = document.getElementById('ai-brief');
+  brief.className = ''; // remove 'waiting'
+  brief.textContent = r.handoverBrief || '(no brief available)';
+
+  // Priority — update the top info-strip badge with Claude's classification
+  if (r.priority && r.priority.label) {
+    document.getElementById('priority').textContent = r.priority.label;
+  }
+
+  // Risk flags
+  const rf = document.getElementById('ai-risks');
+  rf.innerHTML = '';
+  if (r.riskFlags && r.riskFlags.length) {
+    r.riskFlags.forEach(f => {
+      const s = document.createElement('span'); s.className = 'risk-chip'; s.textContent = f; rf.appendChild(s);
+    });
+  } else {
+    const s = document.createElement('span'); s.className = 'risk-empty'; s.textContent = 'none flagged'; rf.appendChild(s);
+  }
+
+  // Voice distress
+  const va = r.voiceAnalysis || { distressLevel: 'none' };
+  const d = document.getElementById('ai-distress');
+  d.className = 'distress-badge distress-' + (va.distressLevel || 'none');
+  d.textContent = va.distressLevel || 'none';
+}
 
 // Click anywhere on the video to unmute (browsers require gesture for audio)
 video.addEventListener('click', () => { video.muted = !video.muted; });

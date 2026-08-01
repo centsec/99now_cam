@@ -232,6 +232,79 @@ function safeSend(obj) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
 }
 
+// --- Voice / distress signal detector (browser-side audio analysis) ---
+// Analyses the caller's mic stream for markers that plain speech-to-text cannot:
+// screaming/panicked vocalisation, extended silence (unresponsive caller),
+// and loud environmental noise (crash, explosion, alarm). Sent to Claude via
+// the dashboard so the AI can reason about tone + environment, not just words.
+let audioAnalyserCtx = null;
+let audioAnalyserTimer = null;
+function startVoiceAnalysis() {
+  if (!stream) return;
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    audioAnalyserCtx = new AudioCtx();
+    const source = audioAnalyserCtx.createMediaStreamSource(stream);
+    const analyser = audioAnalyserCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    source.connect(analyser);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+
+    let silenceSince = null;
+    let lastEventAt = 0;
+    const COOLDOWN_MS = 3500;
+
+    audioAnalyserTimer = setInterval(() => {
+      if (!stream) return;
+      analyser.getByteFrequencyData(data);
+      const now = Date.now();
+
+      // Overall energy
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) sum += data[i];
+      const volume = sum / data.length;
+
+      // Energy in ~1kHz–5kHz band (panic / scream range)
+      const lo = Math.floor(data.length * 0.04);
+      const hi = Math.floor(data.length * 0.22);
+      let highSum = 0;
+      for (let i = lo; i < hi; i++) highSum += data[i];
+      const highFreq = highSum / Math.max(1, hi - lo);
+
+      if (now - lastEventAt < COOLDOWN_MS) return;
+
+      if (volume > 130 && highFreq > 100) {
+        pushAudioEvent('scream_or_panic', 'Screaming or panicked vocalisation detected in caller audio');
+        lastEventAt = now; silenceSince = null;
+      } else if (volume > 175) {
+        pushAudioEvent('loud_background_noise', 'Very loud environmental sound (possible impact, alarm, or nearby event)');
+        lastEventAt = now; silenceSince = null;
+      } else if (volume < 12) {
+        if (!silenceSince) silenceSince = now;
+        else if (now - silenceSince > 5000) {
+          pushAudioEvent('extended_silence', 'Extended silence from caller — no vocalisation detected for 5+ seconds');
+          lastEventAt = now; silenceSince = null;
+        }
+      } else {
+        silenceSince = null;
+      }
+    }, 500);
+  } catch (err) {
+    console.warn('voice analysis unavailable', err);
+  }
+}
+function pushAudioEvent(type, description) {
+  const event = { type, description, time: new Date().toLocaleTimeString('en-GB') };
+  safeSend({ type: 'audio-event', event });
+}
+function stopVoiceAnalysis() {
+  if (audioAnalyserTimer) clearInterval(audioAnalyserTimer);
+  audioAnalyserTimer = null;
+  if (audioAnalyserCtx) try { audioAnalyserCtx.close(); } catch {}
+  audioAnalyserCtx = null;
+}
+
 function connectWs() {
   setStatus('opening signaling…');
   try {
@@ -362,7 +435,7 @@ acceptBtn.onclick = async () => {
     startScreen.style.display = 'none';
     connectWs();
     // wait a tick so ws is opening; geo + transcript can fire once it's open
-    setTimeout(() => { sendGeolocation(); startTranscript(); }, 300);
+    setTimeout(() => { sendGeolocation(); startTranscript(); startVoiceAnalysis(); }, 300);
   } catch (err) {
     alert('Could not access camera: ' + err.message);
   }
@@ -391,6 +464,7 @@ flipBtn.onclick = async () => {
 
 stopBtn.onclick = () => {
   if (recog) { recog.onend = null; try { recog.stop(); } catch {} recog = null; }
+  stopVoiceAnalysis();
   if (stream) stream.getTracks().forEach(t => t.stop());
   if (pc) try { pc.close(); } catch {}
   if (ws) try { ws.close(); } catch {}
