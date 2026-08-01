@@ -21,6 +21,53 @@ if (!claude) {
   console.warn('[99NOW] ANTHROPIC_API_KEY not set — AI triage will return 503 and dispatch will fall back to keyword mode.');
 }
 
+// --- OpenAI Whisper (server-side transcription) ---
+const HAS_OPENAI_KEY = !!process.env.OPENAI_API_KEY;
+if (!HAS_OPENAI_KEY) {
+  console.warn('[99NOW] OPENAI_API_KEY not set — /api/transcribe will return 503 and the phone will fall back to browser Web Speech API.');
+}
+
+async function transcribeAudioWithWhisper(audioBuffer, mimeType) {
+  const form = new FormData();
+  const ext = mimeType.includes('mp4') ? 'mp4'
+    : mimeType.includes('ogg') ? 'ogg'
+    : 'webm';
+  form.append('file', new Blob([audioBuffer], { type: mimeType }), `audio.${ext}`);
+  form.append('model', 'whisper-1');
+  form.append('language', 'en');
+  form.append('response_format', 'json');
+
+  const r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+    body: form,
+  });
+  if (!r.ok) {
+    const errText = await r.text();
+    throw new Error(`Whisper ${r.status}: ${errText.slice(0, 200)}`);
+  }
+  const data = await r.json();
+  return (data.text || '').trim();
+}
+
+function readRawBody(req, maxBytes = 25 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > maxBytes) {
+        reject(new Error('body too large'));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
 const AI_SYSTEM_PROMPT = `You are the AI clinical-triage assistant for the 99NOW emergency response platform. You provide DECISION SUPPORT to a human 999 call handler; the handler makes every dispatch decision. You do not decide, dispatch, diagnose, or replace clinical judgement.
 
 Given a live transcript of a 999 emergency call in the United Kingdom, produce a structured JSON assessment that helps the handler act faster and more accurately.
@@ -219,6 +266,31 @@ const requestHandler = async (req, res) => {
   if (url.pathname === '/phone') { serveStatic(req, res, 'phone.html'); return; }
   if (url.pathname === '/dispatch') { serveStatic(req, res, 'dispatch.html'); return; }
   if (url.pathname === '/responder') { serveStatic(req, res, 'responder.html'); return; }
+
+  if (url.pathname === '/api/transcribe' && req.method === 'POST') {
+    if (!HAS_OPENAI_KEY) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'OPENAI_API_KEY not configured on server' }));
+      return;
+    }
+    try {
+      const mimeType = (req.headers['content-type'] || 'audio/webm').split(';')[0].trim();
+      const audioBuffer = await readRawBody(req);
+      if (audioBuffer.length < 200) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ text: '' }));
+        return;
+      }
+      const text = await transcribeAudioWithWhisper(audioBuffer, mimeType);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ text }));
+    } catch (err) {
+      console.error('[99NOW] Transcription failed:', err.message);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
 
   if (url.pathname === '/api/analyse' && req.method === 'POST') {
     if (!claude) {

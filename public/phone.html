@@ -203,47 +203,122 @@ function sendGeolocation() {
   );
 }
 
-// --- Live speech-to-text on the phone, sent to dashboard ---
-let recog = null;
-let transcriptGotResult = false;
+// --- Live speech-to-text via server-side Whisper ---
+// The phone records audio in short segments and POSTs each one to /api/transcribe.
+// The server proxies to OpenAI Whisper and returns text, which we push to the
+// dashboard as a normal transcript message. Works on every browser (unlike Web
+// Speech API), doesn't fight getUserMedia for the mic.
+let mediaRecorder = null;
+let recordingActive = false;
+const CHUNK_MS = 4000; // 4-second segments — good trade of latency vs Whisper accuracy
+
+function pickAudioMimeType() {
+  if (!window.MediaRecorder) return null;
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4;codecs=mp4a.40.2',
+    'audio/ogg;codecs=opus',
+    'audio/mp4',
+  ];
+  for (const t of candidates) {
+    if (MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return '';
+}
+
 function startTranscript() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {
-    setStatus('speech API unsupported', 'err');
-    safeSend({ type: 'transcript', text: '[transcript unsupported on this browser]', interim: false });
+  if (!stream) return;
+  const audioTracks = stream.getAudioTracks();
+  if (audioTracks.length === 0) {
+    setStatus('no audio track', 'err');
     return;
   }
-  recog = new SR();
-  recog.continuous = true;
-  recog.interimResults = true;
-  recog.lang = 'en-GB';
-  recog.onstart = () => { setStatus('listening…', 'ok'); };
-  recog.onaudiostart = () => { setStatus('mic open — speak', 'ok'); };
-  recog.onspeechstart = () => { setStatus('voice detected', 'ok'); };
-  recog.onspeechend = () => { setStatus('listening…', 'ok'); };
-  recog.onresult = (e) => {
-    transcriptGotResult = true;
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const r = e.results[i];
-      const text = r[0].transcript.trim();
-      if (!text) continue;
-      setStatus('transcribing', 'ok');
-      safeSend({ type: 'transcript', text, interim: !r.isFinal });
-    }
-  };
-  recog.onerror = (e) => {
-    console.warn('speech err', e.error);
-    setStatus('speech err: ' + e.error, 'err');
-  };
-  recog.onend = () => {
-    if (stream) {
-      try { recog.start(); } catch (err) { setStatus('restart failed: ' + err.message, 'err'); }
-    }
-  };
-  try { recog.start(); } catch (e) {
-    console.warn(e);
-    setStatus('speech start failed: ' + e.message, 'err');
+  if (!window.MediaRecorder) {
+    setStatus('MediaRecorder unsupported', 'err');
+    safeSend({ type: 'transcript', text: '[audio recording unsupported on this browser]', interim: false });
+    return;
   }
+  const mimeType = pickAudioMimeType();
+  if (mimeType === null) {
+    setStatus('MediaRecorder unsupported', 'err');
+    return;
+  }
+  const audioOnly = new MediaStream([audioTracks[0]]);
+  recordingActive = true;
+  setStatus('listening (Whisper)', 'ok');
+  recordNextChunk(audioOnly, mimeType);
+}
+
+function recordNextChunk(audioOnly, mimeType) {
+  if (!recordingActive) return;
+  const chunks = [];
+  try {
+    mediaRecorder = mimeType
+      ? new MediaRecorder(audioOnly, { mimeType })
+      : new MediaRecorder(audioOnly);
+  } catch (err) {
+    setStatus('recorder err: ' + err.message, 'err');
+    return;
+  }
+  const actualType = mediaRecorder.mimeType || mimeType || 'audio/webm';
+
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) chunks.push(e.data);
+  };
+  mediaRecorder.onerror = (e) => {
+    console.warn('recorder err', e);
+    setStatus('recorder error', 'err');
+  };
+  mediaRecorder.onstop = async () => {
+    // Kick off the next recording immediately so we don't lose audio at boundaries
+    if (recordingActive) setTimeout(() => recordNextChunk(audioOnly, mimeType), 0);
+
+    if (chunks.length === 0) return;
+    const blob = new Blob(chunks, { type: actualType });
+    if (blob.size < 500) return; // too small to be worth transcribing
+
+    try {
+      const r = await fetch('/api/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': actualType },
+        body: blob,
+      });
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        setStatus('whisper err ' + r.status, 'err');
+        console.warn('transcribe failed', body);
+        return;
+      }
+      const data = await r.json();
+      if (data.text && data.text.trim() && !/^\[?(silence|no speech|inaudible)/i.test(data.text.trim())) {
+        setStatus('transcribing (Whisper)', 'ok');
+        safeSend({ type: 'transcript', text: data.text.trim(), interim: false });
+      }
+    } catch (err) {
+      console.warn('transcribe err', err);
+      setStatus('network err', 'err');
+    }
+  };
+
+  try {
+    mediaRecorder.start();
+    setTimeout(() => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        try { mediaRecorder.stop(); } catch {}
+      }
+    }, CHUNK_MS);
+  } catch (err) {
+    setStatus('start err: ' + err.message, 'err');
+  }
+}
+
+function stopTranscript() {
+  recordingActive = false;
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    try { mediaRecorder.stop(); } catch {}
+  }
+  mediaRecorder = null;
 }
 
 function safeSend(obj) {
@@ -481,7 +556,7 @@ flipBtn.onclick = async () => {
 };
 
 stopBtn.onclick = () => {
-  if (recog) { recog.onend = null; try { recog.stop(); } catch {} recog = null; }
+  stopTranscript();
   stopVoiceAnalysis();
   if (stream) stream.getTracks().forEach(t => t.stop());
   if (pc) try { pc.close(); } catch {}
