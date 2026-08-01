@@ -185,22 +185,67 @@ async function getCamera() {
   video.srcObject = stream;
 }
 
-// --- Geolocation: send one fix when accepted ---
+// --- Geolocation: continuous watch, high-accuracy first, low-accuracy fallback ---
+let geoWatchId = null;
 function sendGeolocation() {
   if (!navigator.geolocation) {
-    safeSend({ type: 'geo', error: 'unsupported' });
+    safeSend({ type: 'geo', error: 'geolocation unsupported' });
     return;
   }
-  navigator.geolocation.getCurrentPosition(
-    (pos) => safeSend({
+  console.log('[geo] requesting location…');
+
+  const onSuccess = (pos) => {
+    console.log('[geo] fix:', pos.coords.latitude, pos.coords.longitude, '±' + Math.round(pos.coords.accuracy) + 'm');
+    safeSend({
       type: 'geo',
       lat: pos.coords.latitude,
       lon: pos.coords.longitude,
       accuracy: pos.coords.accuracy,
-    }),
-    (err) => safeSend({ type: 'geo', error: err.message }),
-    { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
-  );
+    });
+  };
+
+  const codeToText = {
+    1: 'permission denied — allow location in browser settings',
+    2: 'position unavailable — GPS may be turned off',
+    3: 'timeout — no GPS fix in time',
+  };
+
+  const onError = (err) => {
+    const readable = codeToText[err.code] || err.message || 'unknown error';
+    console.warn('[geo] error', err.code, err.message);
+    safeSend({ type: 'geo', error: readable });
+  };
+
+  // First try: high accuracy, generous timeout, continuous watch for improving fixes
+  try {
+    geoWatchId = navigator.geolocation.watchPosition(
+      onSuccess,
+      (err) => {
+        // If high-accuracy watch fails, try a one-shot low-accuracy fallback
+        if (err.code === 3 || err.code === 2) {
+          console.log('[geo] retry with low accuracy');
+          navigator.geolocation.getCurrentPosition(
+            onSuccess,
+            onError,
+            { enableHighAccuracy: false, timeout: 30000, maximumAge: 60000 }
+          );
+        } else {
+          onError(err); // permission denied — no point retrying
+        }
+      },
+      { enableHighAccuracy: true, timeout: 30000, maximumAge: 5000 }
+    );
+  } catch (err) {
+    console.warn('[geo] watch threw', err);
+    onError({ code: 0, message: err.message });
+  }
+}
+
+function stopGeolocation() {
+  if (geoWatchId !== null) {
+    try { navigator.geolocation.clearWatch(geoWatchId); } catch {}
+    geoWatchId = null;
+  }
 }
 
 // --- Live speech-to-text via server-side Whisper ---
@@ -558,6 +603,7 @@ flipBtn.onclick = async () => {
 stopBtn.onclick = () => {
   stopTranscript();
   stopVoiceAnalysis();
+  stopGeolocation();
   if (stream) stream.getTracks().forEach(t => t.stop());
   if (pc) try { pc.close(); } catch {}
   if (ws) try { ws.close(); } catch {}
