@@ -4,6 +4,10 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>99NOW Responder Feed</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -79,6 +83,33 @@
   .ai-panel .distress-moderate { background: #5a2600; color: #ffb774; }
   .ai-panel .distress-severe { background: #c8102e; color: #fff; animation: pulse 1.2s infinite; }
   .ai-panel .waiting { color: #8b94a3; font-size: 12px; font-style: italic; }
+
+  /* Responder map */
+  .map-panel {
+    padding: 0; background: #14171c; border-top: 1px solid #232830;
+    height: 240px; position: relative;
+  }
+  #responder-map { width: 100%; height: 100%; background: #14171c; }
+  .map-panel .no-fix {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    color: #8b94a3; font-size: 13px; padding: 20px; pointer-events: none; z-index: 500;
+  }
+  .map-panel .no-fix.hidden { display: none; }
+  .leaflet-container { background: #14171c !important; font-family: inherit !important; }
+  .leaflet-control-attribution {
+    background: rgba(0,0,0,0.55) !important;
+    color: #8b94a3 !important; font-size: 9px !important;
+  }
+  .leaflet-control-attribution a { color: #7cb9e8 !important; }
+  .leaflet-control-zoom a {
+    background: #1b1f26 !important; color: #e7ecf2 !important;
+    border-color: #232830 !important;
+  }
+  .caller-pin-r {
+    background: #c8102e; width: 14px; height: 14px; border-radius: 50%;
+    box-shadow: 0 0 0 3px rgba(255,255,255,0.95), 0 0 12px #ff3b5c;
+    animation: pulse 1.6s infinite;
+  }
 </style>
 </head>
 <body>
@@ -117,6 +148,11 @@
   </div>
 </div>
 
+<div class="map-panel">
+  <div id="responder-map"></div>
+  <div class="no-fix" id="responder-map-no-fix">Awaiting caller GPS…</div>
+</div>
+
 <div class="ai-panel" id="ai-panel">
   <div class="col" style="grid-column: 1 / span 2;">
     <h4>Dispatch Brief (live AI)</h4>
@@ -151,6 +187,44 @@ if (lat && lon) {
   document.getElementById('gps').textContent = `${parseFloat(lat).toFixed(5)}, ${parseFloat(lon).toFixed(5)} ±${Math.round(accuracy||0)}m`;
 }
 document.getElementById('dispatched-at').textContent = new Date().toLocaleTimeString();
+
+// --- Leaflet map for caller location ---
+let responderMap = null;
+let callerMarker = null;
+let accuracyCircle = null;
+function initResponderMap() {
+  if (typeof L === 'undefined' || responderMap) return;
+  responderMap = L.map('responder-map', {
+    zoomControl: true, attributionControl: true, scrollWheelZoom: true,
+  }).setView([51.5074, -0.1278], 5);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; OpenStreetMap &copy; CARTO',
+    subdomains: 'abcd', maxZoom: 20,
+  }).addTo(responderMap);
+}
+function updateResponderMap(latN, lonN, acc) {
+  if (!responderMap) initResponderMap();
+  if (!responderMap) return;
+  const noFix = document.getElementById('responder-map-no-fix');
+  if (noFix) noFix.classList.add('hidden');
+  const pinIcon = L.divIcon({
+    className: '',
+    html: '<div class="caller-pin-r"></div>',
+    iconSize: [14, 14], iconAnchor: [7, 7],
+  });
+  if (!callerMarker) callerMarker = L.marker([latN, lonN], { icon: pinIcon }).addTo(responderMap);
+  else callerMarker.setLatLng([latN, lonN]);
+  if (accuracyCircle) responderMap.removeLayer(accuracyCircle);
+  accuracyCircle = L.circle([latN, lonN], {
+    radius: Math.max(acc || 20, 20),
+    color: '#ff3b5c', weight: 1, fillColor: '#c8102e', fillOpacity: 0.12,
+  }).addTo(responderMap);
+  responderMap.setView([latN, lonN], 16);
+}
+initResponderMap();
+if (lat && lon) {
+  updateResponderMap(parseFloat(lat), parseFloat(lon), parseFloat(accuracy) || 0);
+}
 
 const ICE_CONFIG = {
   iceServers: [
@@ -244,6 +318,14 @@ ws.onmessage = async (e) => {
   }
   if (msg.type === 'ai-update') {
     renderAiInsights(msg.payload);
+  }
+  if (msg.type === 'geo-update' && msg.payload) {
+    const { lat: la, lon: lo, accuracy: acc } = msg.payload;
+    if (typeof la === 'number' && typeof lo === 'number') {
+      updateResponderMap(la, lo, acc);
+      const gps = document.getElementById('gps');
+      if (gps) gps.textContent = `${la.toFixed(5)}, ${lo.toFixed(5)} ±${Math.round(acc||0)}m`;
+    }
   }
 };
 
