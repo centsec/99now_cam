@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>99NOW Dashboard</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0d10;
+    --panel: #14171c;
+    --panel-2: #1b1f26;
+    --border: #232830;
+    --text: #e7ecf2;
+    --muted: #8b94a3;
+    --accent: #c8102e;
+    --accent-2: #ff3b5c;
+    --ok: #1f9d55;
+    --warn: #e6a700;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: 'Inter', system-ui, sans-serif;
+    background: var(--bg); color: var(--text);
+    height: 100vh; overflow: hidden;
+    display: grid; grid-template-rows: 56px 1fr;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  .logo {
+    font-weight: 800; font-size: 18px; letter-spacing: 1px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .logo .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 8px var(--accent-2);
+    animation: pulse 1.5s infinite;
+  }
+  @keyframes pulse { 50% { opacity: 0.4; } }
+  .logo .nowtag {
+    background: var(--accent); padding: 2px 8px; border-radius: 4px;
+    font-size: 13px; letter-spacing: 1.5px;
+  }
+  header .sep { flex: 1; }
+  .pill {
+    background: var(--panel-2); border: 1px solid var(--border);
+    padding: 6px 12px; border-radius: 999px; font-size: 13px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .pill .led { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .pill.live .led { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .pill.waiting .led { background: var(--warn); }
+  .pill.ended .led { background: var(--accent); }
+  .timer { font-family: ui-monospace, monospace; font-size: 14px; }
+
+  main {
+    display: grid;
+    grid-template-columns: 320px 1fr 420px;
+    grid-template-rows: 1fr auto;
+    gap: 14px; padding: 14px; min-height: 0;
+  }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px; min-height: 0;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .panel h3 {
+    margin: 0; font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1.2px; color: var(--muted);
+  }
+
+  .caller { grid-row: 1 / span 2; grid-column: 1; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; }
+  .field .value { font-size: 14px; color: var(--text); }
+  .severity {
+    display: inline-block; padding: 4px 10px; border-radius: 4px;
+    font-size: 13px; font-weight: 700; letter-spacing: 0.5px;
+    background: var(--accent); color: #fff;
+  }
+  .map {
+    margin-top: auto;
+    aspect-ratio: 1; background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 8px; position: relative; overflow: hidden;
+  }
+  .map .grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+  .map .ping {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 16px; height: 16px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 0 0 var(--accent-2);
+    animation: ping 1.6s infinite;
+  }
+  @keyframes ping {
+    0% { box-shadow: 0 0 0 0 rgba(255,59,92,0.6); }
+    100% { box-shadow: 0 0 0 32px rgba(255,59,92,0); }
+  }
+  .map .coords {
+    position: absolute; bottom: 8px; left: 8px;
+    background: rgba(0,0,0,0.5); padding: 4px 8px;
+    font-family: ui-monospace, monospace; font-size: 11px; border-radius: 4px;
+  }
+
+  .transcript { grid-column: 2; grid-row: 1; min-height: 0; }
+  .transcript .feed {
+    flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+    padding-right: 6px;
+  }
+  .feed::-webkit-scrollbar { width: 8px; }
+  .feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  .msg {
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 10px 12px; border-radius: 8px; max-width: 80%;
+    background: var(--panel-2); border: 1px solid var(--border);
+  }
+  .msg .who { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  .msg.caller { align-self: flex-start; }
+  .msg.caller .who { color: var(--accent-2); }
+  .msg.handler { align-self: flex-end; background: #1c2a1c; border-color: #2a4a2a; }
+  .msg.handler .who { color: #6ed28a; }
+  .msg.system { align-self: center; background: transparent; border: 1px dashed var(--border); font-size: 12px; color: var(--muted); }
+  .msg .text { font-size: 14px; line-height: 1.4; }
+  .msg.interim .text { opacity: 0.65; font-style: italic; }
+
+  .compose { display: flex; gap: 8px; margin-top: 6px; }
+  .compose input {
+    flex: 1; background: var(--panel-2); border: 1px solid var(--border);
+    color: var(--text); padding: 10px 12px; border-radius: 6px; font-size: 14px; outline: none;
+  }
+  .compose input:focus { border-color: var(--accent); }
+  .compose button {
+    border: 0; background: var(--accent); color: #fff;
+    padding: 0 16px; border-radius: 6px; font-weight: 600; font-size: 14px; cursor: pointer;
+  }
+
+  /* Right column stacked */
+  .right-col {
+    grid-column: 3; grid-row: 1;
+    display: flex; flex-direction: column; gap: 14px; min-height: 0;
+  }
+  .video-panel { flex: 1; padding: 0; overflow: hidden; position: relative; min-height: 200px; }
+  .video-panel video { width: 100%; height: 100%; object-fit: cover; background: #000; }
+  .video-panel .vlabel {
+    position: absolute; top: 10px; left: 10px;
+    background: rgba(0,0,0,0.55); padding: 4px 10px; border-radius: 4px;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+  }
+  .video-panel .vlabel .rec {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent); margin-right: 6px;
+    animation: pulse 1.2s infinite;
+  }
+  .video-panel .placeholder {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    color: var(--muted); font-size: 13px; text-align: center; padding: 20px;
+  }
+
+  /* Send link panel */
+  .link-panel input[type=tel] {
+    background: var(--panel-2); border: 1px solid var(--border);
+    color: var(--text); padding: 10px 12px; border-radius: 6px; font-size: 14px; outline: none;
+    font-family: ui-monospace, monospace;
+  }
+  .link-panel input[type=tel]:focus { border-color: var(--accent); }
+  .link-panel .send-row { display: flex; gap: 8px; }
+  .link-panel .send-row input { flex: 1; }
+  .link-panel button {
+    border: 0; background: var(--accent); color: #fff;
+    padding: 0 16px; border-radius: 6px; font-weight: 600; font-size: 14px; cursor: pointer;
+    white-space: nowrap;
+  }
+  .link-panel .urlrow {
+    font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted);
+    background: var(--panel-2); padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);
+    word-break: break-all;
+  }
+  .link-panel .urlrow strong { color: #9ad; }
+  .link-panel .sent-toast {
+    background: #143; color: #cfc; padding: 8px 10px; border-radius: 6px;
+    font-size: 12px; display: none;
+  }
+  .link-panel .sent-toast.show { display: block; }
+
+  /* Instructions panel */
+  .instr-panel { max-height: 280px; }
+  .instr-list {
+    flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;
+    padding-right: 4px;
+  }
+  .instr-list::-webkit-scrollbar { width: 6px; }
+  .instr-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  .instr-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--panel-2);
+  }
+  .instr-item .icon {
+    width: 32px; height: 32px; border-radius: 6px;
+    background: var(--accent); display: grid; place-items: center;
+    font-size: 16px; flex-shrink: 0;
+  }
+  .instr-item .meta { flex: 1; min-width: 0; }
+  .instr-item .meta .t { font-size: 13px; font-weight: 600; }
+  .instr-item .meta .d { font-size: 11px; color: var(--muted); }
+  .instr-item button {
+    border: 0; background: var(--panel); color: var(--text);
+    border: 1px solid var(--border);
+    padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+  .instr-item button:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }
+  .instr-item button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .actions {
+    grid-column: 2 / span 2; grid-row: 2;
+    display: flex; gap: 8px; padding: 10px 14px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  }
+  .actions button {
+    flex: 1; padding: 10px 14px; border: 0; border-radius: 6px;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  }
+  .actions button:hover { background: #232830; }
+  .actions button.danger { background: var(--accent); border-color: var(--accent); }
+  .actions button.danger:hover { background: var(--accent-2); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <span class="dot"></span>
+    <span class="nowtag">99NOW</span>
+    <span>Dashboard</span>
+  </div>
+  <div class="sep"></div>
+  <div class="pill" id="status-pill"><span class="led"></span><span id="status-text">waiting for caller</span></div>
+  <div class="pill"><span class="timer" id="timer">00:00</span></div>
+</header>
+
+<main>
+
+  <section class="panel caller">
+    <h3>Active Call</h3>
+    <div class="field">
+      <span class="label">Caller ID</span>
+      <span class="value">Mobile · +44 7700 900 471</span>
+    </div>
+    <div class="field">
+      <span class="label">Incident Type</span>
+      <span class="value">Road traffic collision</span>
+    </div>
+    <div class="field">
+      <span class="label">Priority</span>
+      <span class="severity">CATEGORY 1</span>
+    </div>
+    <div class="field">
+      <span class="label">Reported Address</span>
+      <span class="value" id="loc-address">Awaiting GPS…</span>
+    </div>
+    <div class="field">
+      <span class="label">Coordinates</span>
+      <span class="value" id="loc-coords" style="font-family:ui-monospace,monospace;font-size:13px;">—</span>
+    </div>
+
+    <h3 style="margin-top:8px;">Live Location</h3>
+    <div class="map">
+      <div class="grid"></div>
+      <div class="ping"></div>
+      <div class="coords" id="map-coords">awaiting fix…</div>
+    </div>
+  </section>
+
+  <section class="panel transcript">
+    <h3>Live Transcript</h3>
+    <div class="feed" id="feed">
+      <div class="msg system"><div class="text">Awaiting caller connection…</div></div>
+    </div>
+    <div class="compose">
+      <input id="instr" type="text" placeholder="Send a visual instruction to caller…" />
+      <button id="send-instr">Send</button>
+    </div>
+  </section>
+
+  <div class="right-col">
+    <section class="panel video-panel">
+      <video id="v" autoplay playsinline muted></video>
+      <div class="vlabel"><span class="rec"></span>LIVE</div>
+      <div class="placeholder" id="vplaceholder">No video feed</div>
+    </section>
+
+    <section class="panel link-panel">
+      <h3>Send Video Link to Caller</h3>
+      <div class="send-row">
+        <input id="caller-number" type="tel" value="+44 7700 900 471" />
+        <button id="send-link">Send Link</button>
+      </div>
+      <div class="urlrow"><strong id="caller-url-text"></strong></div>
+      <div class="sent-toast" id="sent-toast">Link sent — awaiting caller to accept.</div>
+    </section>
+
+    <section class="panel instr-panel">
+      <h3>Quick Instructions — Send to Caller</h3>
+      <div class="instr-list" id="instr-list"></div>
+    </section>
+  </div>
+
+  <div class="actions">
+    <button id="dispatch">Dispatch Unit</button>
+    <button id="snapshot">Capture Snapshot</button>
+    <button id="escalate">Escalate</button>
+    <button id="mute">Mute Audio</button>
+    <button id="end-call" class="danger">End Call</button>
+  </div>
+
+</main>
+
+<script>
+// WebRTC ICE configuration — STUN works free/no-signup and covers most NAT cases.
+// For symmetric NAT (some cellular carriers) you'll also need TURN — add credentials below.
+const ICE_CONFIG = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    // To add TURN (recommended for reliable cellular), sign up free at metered.ca and paste here:
+    // { urls: 'turn:standard.relay.metered.ca:80', username: 'YOUR_USER', credential: 'YOUR_PASS' },
+    // { urls: 'turn:standard.relay.metered.ca:443', username: 'YOUR_USER', credential: 'YOUR_PASS' },
+  ],
+};
+
+const statusPill = document.getElementById('status-pill');
+const statusText = document.getElementById('status-text');
+const timerEl = document.getElementById('timer');
+const video = document.getElementById('v');
+const feed = document.getElementById('feed');
+const vplaceholder = document.getElementById('vplaceholder');
+const locAddress = document.getElementById('loc-address');
+const locCoords = document.getElementById('loc-coords');
+const mapCoords = document.getElementById('map-coords');
+const instrInput = document.getElementById('instr');
+const sendInstrBtn = document.getElementById('send-instr');
+const muteBtn = document.getElementById('mute');
+const endCallBtn = document.getElementById('end-call');
+const callerNumberInput = document.getElementById('caller-number');
+const sendLinkBtn = document.getElementById('send-link');
+const sentToast = document.getElementById('sent-toast');
+const callerUrlText = document.getElementById('caller-url-text');
+const instrListEl = document.getElementById('instr-list');
+
+// caller link (the URL the phone opens to accept the video request)
+const callerUrl = `${location.origin}/phone`;
+callerUrlText.textContent = callerUrl;
+
+// --- Instructional video library (swap these YouTube IDs for your preferred clips) ---
+const INSTRUCTIONS = [
+  { id: 'ILxjxfB4zNk', icon: '❤', title: 'Hands-only CPR',          duration: '1:30' },
+  { id: 'IhPj7-aXq68', icon: '⚡', title: 'Using a defibrillator (AED)', duration: '2:15' },
+  { id: 'ZYwH9oVOe4Y', icon: '↩', title: 'Recovery position',        duration: '1:05' },
+  { id: 'PA9hpOnvtCk', icon: '✋', title: 'Choking (adult)',           duration: '1:45' },
+  { id: 'YuMvSHIJjsk', icon: '◎', title: 'Severe bleeding control',   duration: '2:00' },
+];
+
+function renderInstructions() {
+  instrListEl.innerHTML = '';
+  INSTRUCTIONS.forEach((v) => {
+    const item = document.createElement('div');
+    item.className = 'instr-item';
+    item.innerHTML = `
+      <div class="icon">${v.icon}</div>
+      <div class="meta">
+        <div class="t">${v.title}</div>
+        <div class="d">${v.duration}</div>
+      </div>
+      <button data-id="${v.id}">Send</button>
+    `;
+    const btn = item.querySelector('button');
+    btn.disabled = !phoneConnected;
+    btn.onclick = () => sendInstructionalVideo(v);
+    instrListEl.appendChild(item);
+  });
+}
+
+function sendInstructionalVideo(v) {
+  const url = `https://www.youtube.com/embed/${v.id}?autoplay=1&playsinline=1&rel=0`;
+  send({ type: 'video', id: v.id, title: v.title, url });
+  addMessage({ kind: 'system', text: `Sent video: ${v.title}` });
+}
+
+let pc = null;
+let ws = null;
+let callStart = null;
+let timerInterval = null;
+let interimEl = null;
+let phoneConnected = false;
+let dispatchWin = null;
+const responderPcs = new Map(); // responderId -> RTCPeerConnection
+
+// Caller info pushed to dispatch window
+const callerProfile = { caller: 'Mobile · +44 7700 900 471', incidentDefault: 'Road traffic collision' };
+let currentGeo = null;
+const transcriptLog = [];
+
+function setStatus(text, kind) {
+  statusText.textContent = text;
+  statusPill.className = 'pill' + (kind ? ' ' + kind : '');
+}
+
+function setPhoneConnected(v) {
+  phoneConnected = v;
+  // refresh instruction buttons' disabled state
+  instrListEl.querySelectorAll('button').forEach(b => b.disabled = !v);
+}
+
+function startTimer() {
+  callStart = Date.now();
+  timerInterval = setInterval(() => {
+    const s = Math.floor((Date.now() - callStart) / 1000);
+    const mm = String(Math.floor(s / 60)).padStart(2, '0');
+    const ss = String(s % 60).padStart(2, '0');
+    timerEl.textContent = `${mm}:${ss}`;
+  }, 500);
+}
+function stopTimer() { if (timerInterval) clearInterval(timerInterval); timerInterval = null; }
+
+function addMessage({ who, text, kind = 'caller', interim = false }) {
+  const systems = feed.querySelectorAll('.msg.system');
+  systems.forEach(s => { if (s.textContent.includes('Awaiting')) s.remove(); });
+
+  if (interim) {
+    if (!interimEl) {
+      interimEl = document.createElement('div');
+      interimEl.className = `msg ${kind} interim`;
+      const w = document.createElement('div'); w.className = 'who'; w.textContent = who;
+      const t = document.createElement('div'); t.className = 'text';
+      interimEl.appendChild(w); interimEl.appendChild(t);
+      feed.appendChild(interimEl);
+    }
+    interimEl.querySelector('.text').textContent = text;
+  } else {
+    if (interimEl) { interimEl.remove(); interimEl = null; }
+    const el = document.createElement('div');
+    el.className = `msg ${kind}`;
+    if (kind === 'system') {
+      const t = document.createElement('div'); t.className = 'text'; t.textContent = text;
+      el.appendChild(t);
+    } else {
+      const w = document.createElement('div'); w.className = 'who'; w.textContent = who;
+      const t = document.createElement('div'); t.className = 'text'; t.textContent = text;
+      el.appendChild(w); el.appendChild(t);
+    }
+    feed.appendChild(el);
+  }
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function newPeer() {
+  if (pc) try { pc.close(); } catch {}
+  pc = new RTCPeerConnection(ICE_CONFIG);
+  pc.ontrack = (e) => {
+    video.srcObject = e.streams[0];
+    video.play().catch(() => {}); // ignore autoplay reject — video is muted so should be fine
+    vplaceholder.style.display = 'none';
+    setStatus('live · streaming', 'live');
+    if (!callStart) { startTimer(); pushToDispatch({ type: 'call-start', payload: { t: Date.now() } }); }
+    pushToDispatch({ type: 'stream' });
+    // Attach the new tracks to any responders that were waiting
+    responderPcs.forEach((rpc, id) => {
+      if (!rpc._pending) return;
+      try {
+        e.streams[0].getTracks().forEach(t => rpc.addTrack(t, e.streams[0]));
+        rpc._pending = false;
+        sendOfferToResponder(id, rpc);
+      } catch (err) { console.warn(err); }
+    });
+  };
+  pc.onicecandidate = (e) => {
+    if (e.candidate) send({ type: 'ice', candidate: e.candidate });
+  };
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'failed') setStatus('connection failed', 'ended');
+    if (pc.connectionState === 'disconnected') setStatus('disconnected', 'ended');
+  };
+  return pc;
+}
+
+function send(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+
+function connectWs() {
+  ws = new WebSocket(`wss://${location.host}`);
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'hello', role: 'viewer' }));
+    setStatus('waiting for caller', 'waiting');
+  };
+  ws.onclose = () => setStatus('signaling closed', 'ended');
+  ws.onmessage = async (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'peer-joined') {
+      setStatus('caller connecting…', 'waiting');
+      setPhoneConnected(true);
+      newPeer();
+      addMessage({ kind: 'system', text: 'Caller accepted video request — establishing link…' });
+      return;
+    }
+    if (msg.type === 'peer-left') {
+      setStatus('caller ended', 'ended');
+      setPhoneConnected(false);
+      if (pc) { try { pc.close(); } catch {} pc = null; }
+      video.srcObject = null;
+      vplaceholder.style.display = 'grid';
+      stopTimer();
+      addMessage({ kind: 'system', text: 'Caller disconnected.' });
+      return;
+    }
+    // Messages that came from a responder (signaling for our forwarded stream)
+    if (msg.from && msg.from.startsWith('responder-')) {
+      const rpc = responderPcs.get(msg.from);
+      if (!rpc) return;
+      if (msg.type === 'answer') {
+        try { await rpc.setRemoteDescription(msg.sdp); } catch (err) { console.warn(err); }
+      } else if (msg.type === 'ice') {
+        try { await rpc.addIceCandidate(msg.candidate); } catch {}
+      }
+      return;
+    }
+    if (msg.type === 'responder-joined') {
+      createResponderForwarder(msg.id, msg.label || msg.id);
+      addMessage({ kind: 'system', text: `Responder unit "${msg.label || msg.id}" connected — forwarding video.` });
+      return;
+    }
+    if (msg.type === 'responder-left') {
+      const rpc = responderPcs.get(msg.id);
+      if (rpc) { try { rpc.close(); } catch {} responderPcs.delete(msg.id); }
+      addMessage({ kind: 'system', text: `Responder unit disconnected.` });
+      return;
+    }
+    if (msg.type === 'offer' && !msg.from) {
+      if (!pc) newPeer();
+      await pc.setRemoteDescription(msg.sdp);
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      send({ type: 'answer', sdp: pc.localDescription });
+      return;
+    }
+    if (msg.type === 'ice' && !msg.from) {
+      if (pc) try { await pc.addIceCandidate(msg.candidate); } catch {}
+      return;
+    }
+    if (msg.type === 'transcript') {
+      addMessage({ who: 'Caller', text: msg.text, kind: 'caller', interim: msg.interim });
+      if (!msg.interim) {
+        transcriptLog.push({ who: 'Caller', text: msg.text, kind: 'caller', time: Date.now() });
+        pushToDispatch({ type: 'transcript-add', payload: { who: 'Caller', text: msg.text, kind: 'caller', time: Date.now() } });
+      }
+      return;
+    }
+    if (msg.type === 'caller-message') {
+      addMessage({ who: 'Caller (typed)', text: msg.text, kind: 'caller' });
+      transcriptLog.push({ who: 'Caller (typed)', text: msg.text, kind: 'caller', time: Date.now() });
+      pushToDispatch({ type: 'transcript-add', payload: { who: 'Caller (typed)', text: msg.text, kind: 'caller', time: Date.now() } });
+      return;
+    }
+    if (msg.type === 'geo') {
+      if (msg.error) { locAddress.textContent = 'Location unavailable (' + msg.error + ')'; return; }
+      const lat = msg.lat.toFixed(5), lon = msg.lon.toFixed(5);
+      locCoords.textContent = `${lat}, ${lon}`;
+      mapCoords.textContent = `${lat}, ${lon}  ±${Math.round(msg.accuracy || 0)}m`;
+      locAddress.textContent = `Approx. lat ${lat}, lon ${lon}`;
+      currentGeo = { lat: msg.lat, lon: msg.lon, accuracy: msg.accuracy };
+      pushToDispatch({ type: 'geo', payload: currentGeo });
+      return;
+    }
+  };
+}
+
+// --- Responder forwarding ---
+async function createResponderForwarder(id, label) {
+  const rpc = new RTCPeerConnection(ICE_CONFIG);
+  responderPcs.set(id, rpc);
+
+  rpc.onicecandidate = (e) => {
+    if (e.candidate) send({ type: 'ice', candidate: e.candidate, to: id });
+  };
+  rpc.onconnectionstatechange = () => {
+    if (['failed','disconnected','closed'].includes(rpc.connectionState)) {
+      try { rpc.close(); } catch {}
+      responderPcs.delete(id);
+    }
+  };
+
+  if (video.srcObject && video.srcObject.getTracks().length) {
+    video.srcObject.getTracks().forEach(t => rpc.addTrack(t, video.srcObject));
+    await sendOfferToResponder(id, rpc);
+  } else {
+    // Defer — pc.ontrack will attach tracks and offer once the phone stream arrives
+    rpc._pending = true;
+  }
+}
+
+async function sendOfferToResponder(id, rpc) {
+  try {
+    const offer = await rpc.createOffer();
+    await rpc.setLocalDescription(offer);
+    send({ type: 'offer', sdp: rpc.localDescription, to: id });
+  } catch (err) {
+    console.warn('responder offer failed', err);
+  }
+}
+
+// --- Dispatch window comms ---
+function pushToDispatch(msg) {
+  if (!dispatchWin || dispatchWin.closed) return;
+  try { dispatchWin.postMessage(msg, location.origin); } catch {}
+}
+window.addEventListener('message', (e) => {
+  if (e.origin !== location.origin) return;
+  if (e.data?.type === 'dispatch-ready') sendFullStateToDispatch();
+});
+function sendFullStateToDispatch() {
+  pushToDispatch({ type: 'state', payload: {
+    caller: callerProfile.caller,
+    incidentDefault: callerProfile.incidentDefault,
+    geo: currentGeo,
+    transcript: transcriptLog.slice(),
+    callStart,
+  }});
+  if (callStart) pushToDispatch({ type: 'call-start', payload: { t: callStart } });
+  if (video.srcObject) pushToDispatch({ type: 'stream' });
+}
+
+// --- Send link ---
+sendLinkBtn.onclick = () => {
+  const num = callerNumberInput.value.trim();
+  if (!num) return;
+  sentToast.textContent = `Link sent to ${num} — awaiting caller to accept.`;
+  sentToast.classList.add('show');
+  addMessage({ kind: 'system', text: `Video link SMS sent to ${num}.` });
+  // simulated SMS only — for the prototype, open the URL on the same machine if you want to test
+  // window.open(callerUrl, '_blank');
+};
+
+// --- Compose ---
+sendInstrBtn.onclick = () => {
+  const text = instrInput.value.trim();
+  if (!text) return;
+  send({ type: 'instruction', text });
+  addMessage({ who: 'Handler', text, kind: 'handler' });
+  instrInput.value = '';
+};
+instrInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendInstrBtn.click(); });
+
+muteBtn.onclick = () => {
+  if (!video.srcObject) return;
+  video.muted = !video.muted;
+  muteBtn.textContent = video.muted ? 'Unmute Audio' : 'Mute Audio';
+};
+
+endCallBtn.onclick = () => {
+  send({ type: 'end-call' });
+  setStatus('call ended', 'ended');
+  stopTimer();
+  addMessage({ kind: 'system', text: 'Handler ended the call.' });
+};
+
+document.getElementById('dispatch').onclick = () => {
+  if (dispatchWin && !dispatchWin.closed) { dispatchWin.focus(); return; }
+  dispatchWin = window.open('/dispatch', 'dispatch', 'width=1400,height=900');
+  addMessage({ kind: 'system', text: 'Dispatch console opened — AI triage active.' });
+};
+document.getElementById('snapshot').onclick = () => {
+  if (!video.srcObject) return;
+  const c = document.createElement('canvas');
+  c.width = video.videoWidth; c.height = video.videoHeight;
+  c.getContext('2d').drawImage(video, 0, 0);
+  const url = c.toDataURL('image/png');
+  const a = document.createElement('a'); a.href = url;
+  a.download = `99now-snapshot-${Date.now()}.png`; a.click();
+  addMessage({ kind: 'system', text: 'Snapshot captured.' });
+};
+document.getElementById('escalate').onclick = () =>
+  addMessage({ kind: 'system', text: 'Incident escalated to senior dispatcher.' });
+
+renderInstructions();
+connectWs();
+muteBtn.textContent = 'Unmute Audio'; // video starts muted to satisfy autoplay policy
+</script>
+</body>
+</html>

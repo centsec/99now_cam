@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>phone-cam — sender</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; font-family: system-ui, sans-serif; background: #000; color: #eee;
+    min-height: 100vh; display: flex; flex-direction: column;
+  }
+  header {
+    padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; background: #111;
+  }
+  header h1 { margin: 0; font-size: 15px; font-weight: 600; }
+  .status { font-size: 12px; padding: 4px 8px; border-radius: 4px; background: #222; }
+  .status.ok { background: #143; color: #cfc; }
+  .status.err { background: #411; color: #fcc; }
+  main { flex: 1; display: grid; place-items: center; }
+  video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+  .controls {
+    padding: 12px 16px; display: flex; gap: 10px; justify-content: center; background: #111;
+  }
+  button {
+    flex: 1; max-width: 220px; padding: 12px;
+    border: 0; border-radius: 8px; background: #2a6; color: #fff;
+    font-size: 15px; font-weight: 600;
+  }
+  button.secondary { background: #333; }
+  button:disabled { opacity: 0.5; }
+  #start-screen {
+    position: fixed; inset: 0; background: #0b0d10; display: grid; place-items: center;
+    padding: 24px;
+  }
+  #start-screen .card {
+    max-width: 360px; width: 100%; text-align: center;
+    display: flex; flex-direction: column; gap: 18px;
+  }
+  #start-screen .badge {
+    align-self: center;
+    background: #c8102e; color: #fff;
+    font-weight: 700; letter-spacing: 0.5px;
+    padding: 6px 14px; border-radius: 999px; font-size: 13px;
+  }
+  #start-screen h2 {
+    margin: 0; font-size: 22px; font-weight: 600; color: #fff;
+  }
+  #start-screen p {
+    margin: 0; color: #b8bec6; line-height: 1.5; font-size: 15px;
+  }
+  #start-screen .actions {
+    display: flex; gap: 10px; margin-top: 8px;
+  }
+  #start-screen .actions button {
+    flex: 1; max-width: none;
+  }
+  #accept { background: #1f9d55; }
+  #decline { background: #2a2f36; color: #fff; }
+  #declined {
+    display: none; color: #b8bec6; font-size: 14px; margin-top: 6px;
+  }
+  .message-row {
+    display: flex; gap: 8px; padding: 10px 12px;
+    background: #111; border-top: 1px solid #1c1c1c;
+  }
+  .message-row input {
+    flex: 1; background: #1b1f26; border: 1px solid #2a2f36;
+    color: #fff; padding: 11px 12px; border-radius: 6px;
+    font-size: 15px; outline: none;
+  }
+  .message-row input:focus { border-color: #c8102e; }
+  .message-row button {
+    background: #c8102e; color: #fff; border: 0;
+    padding: 0 18px; border-radius: 6px; font-weight: 600; font-size: 14px;
+  }
+  .message-row button:disabled { opacity: 0.5; }
+</style>
+</head>
+<body>
+
+<div id="start-screen">
+  <div class="card">
+    <div class="badge">999 Video Request</div>
+    <h2>The call handler has requested to share video</h2>
+    <p>
+      With your consent, they will be able to view your camera and send visual
+      instructions where relevant. You may return to voice-only communication
+      at any time.
+    </p>
+    <div class="actions">
+      <button id="decline">Decline</button>
+      <button id="accept">Accept</button>
+    </div>
+    <div id="declined">Video request declined. You remain on a voice call.</div>
+  </div>
+</div>
+
+<header>
+  <h1>phone-cam</h1>
+  <div id="status" class="status">idle</div>
+</header>
+<main>
+  <video id="v" autoplay playsinline muted></video>
+</main>
+<div class="message-row">
+  <input id="caller-msg" type="text" placeholder="Type a reply to the handler…" autocomplete="off" />
+  <button id="send-caller-msg">Send</button>
+</div>
+<div class="controls">
+  <button id="flip" class="secondary">Flip camera</button>
+  <button id="stop" class="secondary">Stop</button>
+</div>
+
+<script>
+const ICE_CONFIG = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    // Add TURN credentials (metered.ca free tier) here for cellular reliability:
+    // { urls: 'turn:standard.relay.metered.ca:80', username: 'YOUR_USER', credential: 'YOUR_PASS' },
+    // { urls: 'turn:standard.relay.metered.ca:443', username: 'YOUR_USER', credential: 'YOUR_PASS' },
+  ],
+};
+
+const statusEl = document.getElementById('status');
+const video = document.getElementById('v');
+const startScreen = document.getElementById('start-screen');
+const acceptBtn = document.getElementById('accept');
+const declineBtn = document.getElementById('decline');
+const declinedMsg = document.getElementById('declined');
+const flipBtn = document.getElementById('flip');
+const stopBtn = document.getElementById('stop');
+const callerMsgInput = document.getElementById('caller-msg');
+const sendCallerMsgBtn = document.getElementById('send-caller-msg');
+
+sendCallerMsgBtn.onclick = () => {
+  const text = callerMsgInput.value.trim();
+  if (!text) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  safeSend({ type: 'caller-message', text });
+  callerMsgInput.value = '';
+  setStatus('reply sent', 'ok');
+};
+callerMsgInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') sendCallerMsgBtn.click();
+});
+
+function setStatus(msg, kind) {
+  statusEl.textContent = msg;
+  statusEl.className = 'status' + (kind ? ' ' + kind : '');
+}
+
+let stream = null;
+let pc = null;
+let ws = null;
+let facing = 'environment'; // rear camera by default
+let viewerPresent = false;
+
+async function getCamera() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: facing } },
+    audio: true,
+  });
+  video.srcObject = stream;
+}
+
+// --- Geolocation: send one fix when accepted ---
+function sendGeolocation() {
+  if (!navigator.geolocation) {
+    safeSend({ type: 'geo', error: 'unsupported' });
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => safeSend({
+      type: 'geo',
+      lat: pos.coords.latitude,
+      lon: pos.coords.longitude,
+      accuracy: pos.coords.accuracy,
+    }),
+    (err) => safeSend({ type: 'geo', error: err.message }),
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+  );
+}
+
+// --- Live speech-to-text on the phone, sent to dashboard ---
+let recog = null;
+function startTranscript() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    safeSend({ type: 'transcript', text: '[transcript unsupported on this browser]', interim: false });
+    return;
+  }
+  recog = new SR();
+  recog.continuous = true;
+  recog.interimResults = true;
+  recog.lang = 'en-GB';
+  recog.onresult = (e) => {
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i];
+      const text = r[0].transcript.trim();
+      if (!text) continue;
+      safeSend({ type: 'transcript', text, interim: !r.isFinal });
+    }
+  };
+  recog.onerror = (e) => console.warn('speech err', e.error);
+  recog.onend = () => { if (stream) try { recog.start(); } catch {} };
+  try { recog.start(); } catch (e) { console.warn(e); }
+}
+
+function safeSend(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+
+function connectWs() {
+  setStatus('opening signaling…');
+  try {
+    ws = new WebSocket(`wss://${location.host}`);
+  } catch (err) {
+    setStatus('ws error: ' + err.message, 'err');
+    return;
+  }
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'hello', role: 'phone' }));
+    setStatus('waiting for viewer');
+  };
+  ws.onerror = () => setStatus('ws error — try opening wss in browser first', 'err');
+  ws.onclose = (e) => setStatus(`signaling closed (code ${e.code})`, 'err');
+  ws.onmessage = async (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'peer-status') {
+      viewerPresent = msg.present;
+      if (viewerPresent) startOffer();
+      return;
+    }
+    if (msg.type === 'peer-joined') {
+      viewerPresent = true;
+      startOffer();
+      return;
+    }
+    if (msg.type === 'peer-left') {
+      viewerPresent = false;
+      setStatus('viewer left', 'err');
+      if (pc) { try { pc.close(); } catch {} pc = null; }
+      return;
+    }
+    if (msg.type === 'answer') {
+      if (pc) await pc.setRemoteDescription(msg.sdp);
+      return;
+    }
+    if (msg.type === 'ice') {
+      if (pc) try { await pc.addIceCandidate(msg.candidate); } catch {}
+      return;
+    }
+    if (msg.type === 'instruction') {
+      showToast(msg.text);
+      return;
+    }
+    if (msg.type === 'video') {
+      showInstructionalVideo(msg);
+      return;
+    }
+    if (msg.type === 'end-call') {
+      setStatus('handler ended call', 'err');
+      stopBtn.click();
+      return;
+    }
+  };
+}
+
+function showInstructionalVideo({ url, title }) {
+  let modal = document.getElementById('vid-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'vid-modal';
+    modal.style.cssText = `
+      position: fixed; inset: 0; background: #000;
+      z-index: 2000; display: flex; flex-direction: column;
+    `;
+    modal.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#111;">
+        <div style="flex:1;">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#ff8da0;">Handler sent — instructions</div>
+          <div id="vid-title" style="font-size:15px;font-weight:600;color:#fff;"></div>
+        </div>
+        <button id="vid-close" style="background:#c8102e;color:#fff;border:0;padding:8px 14px;border-radius:6px;font-weight:600;">Close</button>
+      </div>
+      <iframe id="vid-frame" style="flex:1;width:100%;border:0;" allow="autoplay; encrypted-media; fullscreen" allowfullscreen></iframe>
+    `;
+    document.body.appendChild(modal);
+    document.getElementById('vid-close').onclick = () => {
+      document.getElementById('vid-frame').src = '';
+      modal.style.display = 'none';
+    };
+  }
+  document.getElementById('vid-title').textContent = title || 'Instructional video';
+  document.getElementById('vid-frame').src = url;
+  modal.style.display = 'flex';
+}
+
+function showToast(text) {
+  let toast = document.getElementById('toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'toast';
+    toast.style.cssText = `
+      position: fixed; left: 12px; right: 12px; bottom: 84px;
+      background: rgba(20,23,28,0.95); color: #fff;
+      padding: 14px 16px; border-radius: 8px; border-left: 4px solid #c8102e;
+      font-size: 15px; line-height: 1.4; z-index: 1000;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+    `;
+    document.body.appendChild(toast);
+  }
+  toast.innerHTML = `<div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#ff8da0;margin-bottom:4px;">Handler instruction</div>${text}`;
+  toast.style.display = 'block';
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { toast.style.display = 'none'; }, 7000);
+}
+
+async function startOffer() {
+  if (!stream) return;
+  if (pc) try { pc.close(); } catch {}
+  pc = new RTCPeerConnection(ICE_CONFIG);
+  pc.onicecandidate = (e) => {
+    if (e.candidate) ws.send(JSON.stringify({ type: 'ice', candidate: e.candidate }));
+  };
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'connected') setStatus('streaming', 'ok');
+    if (pc.connectionState === 'failed') setStatus('connection failed', 'err');
+  };
+  stream.getTracks().forEach(t => pc.addTrack(t, stream));
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  ws.send(JSON.stringify({ type: 'offer', sdp: pc.localDescription }));
+  setStatus('connecting…');
+}
+
+acceptBtn.onclick = async () => {
+  try {
+    await getCamera();
+    startScreen.style.display = 'none';
+    connectWs();
+    // wait a tick so ws is opening; geo + transcript can fire once it's open
+    setTimeout(() => { sendGeolocation(); startTranscript(); }, 300);
+  } catch (err) {
+    alert('Could not access camera: ' + err.message);
+  }
+};
+
+declineBtn.onclick = () => {
+  acceptBtn.disabled = true;
+  declineBtn.disabled = true;
+  declinedMsg.style.display = 'block';
+};
+
+flipBtn.onclick = async () => {
+  facing = (facing === 'environment') ? 'user' : 'environment';
+  try {
+    await getCamera();
+    // replace the track on the existing peer connection
+    if (pc) {
+      const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+      const newTrack = stream.getVideoTracks()[0];
+      if (sender && newTrack) await sender.replaceTrack(newTrack);
+    }
+  } catch (err) {
+    alert('Flip failed: ' + err.message);
+  }
+};
+
+stopBtn.onclick = () => {
+  if (recog) { recog.onend = null; try { recog.stop(); } catch {} recog = null; }
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  if (pc) try { pc.close(); } catch {}
+  if (ws) try { ws.close(); } catch {}
+  stream = null; pc = null; ws = null;
+  setStatus('stopped');
+  startScreen.style.display = 'grid';
+};
+</script>
+</body>
+</html>

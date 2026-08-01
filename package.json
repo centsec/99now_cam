@@ -1,0 +1,17 @@
+{
+  "name": "99now",
+  "version": "1.0.0",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.60.0",
+    "selfsigned": "^2.4.1",
+    "ws": "^8.18.0"
+  }
+}

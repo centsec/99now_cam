@@ -1,0 +1,826 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>99NOW Dispatch Console</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0d10;
+    --panel: #14171c;
+    --panel-2: #1b1f26;
+    --border: #232830;
+    --text: #e7ecf2;
+    --muted: #8b94a3;
+    --accent: #c8102e;
+    --accent-2: #ff3b5c;
+    --ok: #1f9d55;
+    --warn: #e6a700;
+    --police: #2b67c4;
+    --fire: #e6700a;
+    --ambulance: #1f9d55;
+    --coast: #2cb1bc;
+    --air: #8b5cf6;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: 'Inter', system-ui, sans-serif;
+    background: var(--bg); color: var(--text);
+    height: 100vh; overflow: hidden;
+    display: grid; grid-template-rows: 56px 1fr;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  .logo { font-weight: 800; font-size: 18px; letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
+  .logo .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent-2); animation: pulse 1.5s infinite; }
+  @keyframes pulse { 50% { opacity: 0.4; } }
+  .logo .nowtag { background: var(--accent); padding: 2px 8px; border-radius: 4px; font-size: 13px; letter-spacing: 1.5px; }
+  .logo .sub { font-size: 12px; color: var(--muted); font-weight: 500; letter-spacing: 1px; margin-left: 4px; }
+  header .sep { flex: 1; }
+  .pill { background: var(--panel-2); border: 1px solid var(--border); padding: 6px 12px; border-radius: 999px; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+  .pill .led { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+
+  main {
+    display: grid;
+    grid-template-columns: 300px 1fr 400px;
+    grid-template-rows: minmax(0,1fr) auto;
+    gap: 14px; padding: 14px; min-height: 0;
+  }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px; min-height: 0;
+    display: flex; flex-direction: column; gap: 10px; overflow: hidden;
+  }
+  .panel h3 {
+    margin: 0; font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1.2px; color: var(--muted);
+  }
+  .panel .scroll { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; }
+  .scroll::-webkit-scrollbar { width: 6px; }
+  .scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  /* Left: incident summary */
+  .incident { grid-column: 1; grid-row: 1; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; }
+  .field .value { font-size: 14px; }
+  .severity { display: inline-block; padding: 4px 10px; border-radius: 4px; font-size: 13px; font-weight: 700; letter-spacing: 0.5px; background: var(--accent); color: #fff; align-self: flex-start; }
+
+  /* Center: AI panel */
+  .ai { grid-column: 2; grid-row: 1; }
+  .ai-services {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px;
+  }
+  .service {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px;
+    position: relative; overflow: hidden;
+  }
+  .service.recommended {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 6px 14px rgba(200,16,46,0.18);
+  }
+  .service .reco-tag {
+    position: absolute; top: 0; right: 0;
+    background: var(--accent); color: #fff; padding: 2px 8px;
+    font-size: 10px; font-weight: 700; letter-spacing: 1px;
+    border-bottom-left-radius: 6px;
+  }
+  .service .head { display: flex; align-items: center; gap: 8px; }
+  .service .head .icon {
+    width: 32px; height: 32px; border-radius: 6px; display: grid; place-items: center;
+    color: #fff; font-size: 16px; font-weight: 700;
+  }
+  .service.police .icon { background: var(--police); }
+  .service.fire .icon { background: var(--fire); }
+  .service.ambulance .icon { background: var(--ambulance); }
+  .service.coastguard .icon { background: var(--coast); }
+  .service .head .name { flex: 1; font-weight: 600; font-size: 14px; }
+  .service .head .conf { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); }
+  .conf-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .conf-bar .fill { height: 100%; background: var(--accent); transition: width 300ms ease; }
+  .keywords { display: flex; flex-wrap: wrap; gap: 4px; }
+  .kw { background: var(--panel); border: 1px solid var(--border); padding: 2px 6px; border-radius: 4px; font-size: 11px; color: var(--text); }
+  .kw.matched { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  .ai-summary {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px; font-size: 14px; line-height: 1.5;
+  }
+  .ai-summary .lead { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+  .ai-summary strong { color: var(--accent-2); }
+
+  /* AI pill states */
+  #ai-pill.claude .led { background: #7c5cff; box-shadow: 0 0 6px #7c5cff; }
+  #ai-pill.analysing .led { background: var(--warn); animation: pulse 1.2s infinite; }
+  #ai-pill.keyword .led { background: var(--muted); }
+  #ai-pill.error .led { background: var(--accent); }
+
+  /* AI lists */
+  .ai-list { margin: 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 4px; }
+  .ai-list li { font-size: 13px; line-height: 1.4; color: var(--text); }
+  .ai-list li.ai-empty { list-style: none; margin-left: -18px; color: var(--muted); font-style: italic; }
+  .ai-list li::marker { color: var(--accent-2); }
+
+  /* Risk flags */
+  .risk-flags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .risk { background: var(--accent); color: #fff; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+  .risk.empty { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); font-weight: 400; }
+
+  /* Service card indicator/reasoning tweaks for Claude output */
+  .service .reasoning { font-size: 12px; color: var(--muted); line-height: 1.35; }
+
+  /* Right: video preview + handover */
+  .right-col {
+    grid-column: 3; grid-row: 1;
+    display: flex; flex-direction: column; gap: 14px; min-height: 0;
+  }
+  .video-panel { flex: 1; padding: 0; overflow: hidden; position: relative; min-height: 220px; }
+  .video-panel video { width: 100%; height: 100%; object-fit: cover; background: #000; }
+  .video-panel .vlabel { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.55); padding: 4px 10px; border-radius: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+  .video-panel .vlabel .rec { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-right: 6px; animation: pulse 1.2s infinite; }
+  .video-panel .placeholder { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; text-align: center; padding: 20px; }
+
+  .handover { flex-shrink: 0; }
+  .handover textarea {
+    width: 100%; min-height: 100px; max-height: 200px;
+    background: var(--panel-2); border: 1px solid var(--border);
+    color: var(--text); padding: 10px 12px; border-radius: 6px;
+    font-family: ui-monospace, monospace; font-size: 12px;
+    line-height: 1.5; resize: vertical;
+  }
+  .handover textarea:focus { outline: none; border-color: var(--accent); }
+  .handover .actions-row { display: flex; gap: 8px; }
+  .handover button {
+    flex: 1; padding: 8px 12px; border: 0; border-radius: 6px;
+    font-size: 12px; font-weight: 600; cursor: pointer;
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  }
+  .handover button:hover { background: #232830; }
+  .handover button.primary { background: var(--accent); border-color: var(--accent); }
+
+  /* Bottom: units list */
+  .units {
+    grid-column: 1 / span 3; grid-row: 2;
+    display: flex; flex-direction: column; gap: 10px;
+    max-height: 280px;
+  }
+  .units-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+  .unit {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px; display: grid;
+    grid-template-columns: 36px 1fr auto; gap: 10px; align-items: center;
+  }
+  .unit.dispatched { border-color: var(--ok); }
+  .unit.on-scene { border-color: var(--ok); background: #122; }
+  .unit .icon {
+    width: 36px; height: 36px; border-radius: 6px; display: grid; place-items: center;
+    color: #fff; font-size: 16px; font-weight: 700;
+  }
+  .unit.police .icon { background: var(--police); }
+  .unit.fire .icon { background: var(--fire); }
+  .unit.ambulance .icon { background: var(--ambulance); }
+  .unit.coastguard .icon { background: var(--coast); }
+  .unit.air .icon { background: var(--air); }
+  .unit .meta .name { font-size: 13px; font-weight: 600; }
+  .unit .meta .det { font-size: 11px; color: var(--muted); }
+  .unit .actions { display: flex; flex-direction: column; gap: 4px; }
+  .unit .actions button {
+    border: 0; padding: 5px 10px; border-radius: 5px;
+    font-size: 11px; font-weight: 600; cursor: pointer;
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .unit .actions button:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }
+  .unit .actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .unit .actions .send-video { background: var(--accent); border-color: var(--accent); }
+  .unit .actions .send-video:disabled { background: var(--panel); border-color: var(--border); }
+  .unit .status-tag { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--ok); margin-top: 2px; }
+  .unit .eta { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <span class="dot"></span>
+    <span class="nowtag">99NOW</span>
+    <span>Dispatch</span>
+    <span class="sub">AI-ASSISTED COMMAND CONSOLE</span>
+  </div>
+  <div class="sep"></div>
+  <div class="pill" id="ai-pill"><span class="led"></span><span id="ai-status-text">AI: idle</span></div>
+  <div class="pill"><span class="led"></span><span id="link-status">Connected to dashboard</span></div>
+</header>
+
+<main>
+
+  <section class="panel incident">
+    <h3>Incident</h3>
+    <div class="field">
+      <span class="label">Caller</span>
+      <span class="value" id="caller-info">—</span>
+    </div>
+    <div class="field">
+      <span class="label">Type (AI-detected)</span>
+      <span class="value" id="incident-type">Awaiting transcript…</span>
+    </div>
+    <div class="field">
+      <span class="label">Priority</span>
+      <span class="value severity" id="priority">CATEGORY —</span>
+    </div>
+    <div class="field">
+      <span class="label">Location</span>
+      <span class="value" id="location">—</span>
+    </div>
+    <div class="field">
+      <span class="label">Coordinates</span>
+      <span class="value" id="coords" style="font-family:ui-monospace,monospace;font-size:13px;">—</span>
+    </div>
+    <div class="field">
+      <span class="label">Call duration</span>
+      <span class="value" id="duration" style="font-family:ui-monospace,monospace;">00:00</span>
+    </div>
+  </section>
+
+  <section class="panel ai">
+    <div class="scroll">
+      <h3>AI Triage — Recommended Services</h3>
+      <div class="ai-services" id="ai-services"></div>
+
+      <h3 style="margin-top:6px;">Reasoning</h3>
+      <div class="ai-summary">
+        <div class="lead"><span id="ai-source-label">Detected from transcript &amp; caller messages</span></div>
+        <div id="ai-summary">Awaiting caller input. The AI will analyse the live transcript and recommend appropriate emergency services with confidence scores.</div>
+      </div>
+
+      <h3 style="margin-top:6px;">Suggested Follow-Up Questions</h3>
+      <ul id="ai-followups" class="ai-list">
+        <li class="ai-empty">Awaiting caller input…</li>
+      </ul>
+
+      <h3 style="margin-top:6px;">Pre-Arrival Instructions</h3>
+      <ul id="ai-prearrival" class="ai-list">
+        <li class="ai-empty">Awaiting caller input…</li>
+      </ul>
+
+      <h3 style="margin-top:6px;">Risk Flags</h3>
+      <div id="ai-risks" class="risk-flags">
+        <span class="risk empty">none flagged</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="right-col">
+    <section class="panel video-panel">
+      <video id="v" autoplay playsinline muted></video>
+      <div class="vlabel"><span class="rec"></span>CALLER FEED</div>
+      <div class="placeholder" id="vplaceholder">Awaiting caller stream from dashboard…</div>
+    </section>
+
+    <section class="panel handover">
+      <h3>Handover Brief (auto-populated)</h3>
+      <textarea id="handover-text" spellcheck="false"></textarea>
+      <div class="actions-row">
+        <button id="copy-handover">Copy</button>
+        <button id="print-handover" class="primary">Print</button>
+      </div>
+    </section>
+  </div>
+
+  <section class="panel units">
+    <h3>Available Units — Click "Send Video" to forward live feed</h3>
+    <div class="units-list" id="units-list"></div>
+  </section>
+
+</main>
+
+<script>
+// --- Service taxonomy & AI keyword analysis ---
+const SERVICES = {
+  police:    { icon: '👮', name: 'Police',          keywords: ['robbery', 'assault', 'weapon', 'knife', 'gun', 'firearm', 'fight', 'attack', 'stab', 'mugged', 'break-in', 'intruder', 'suspicious', 'threat', 'stolen', 'violence', 'drunk', 'fighting'] },
+  fire:      { icon: '🔥', name: 'Fire & Rescue',   keywords: ['fire', 'smoke', 'burning', 'flames', 'explosion', 'gas leak', 'trapped', 'collapsed', 'building', 'burn', 'smoke alarm'] },
+  ambulance: { icon: '🚑', name: 'NHS Ambulance',   keywords: ['bleeding', 'unconscious', 'heart attack', 'chest pain', 'breathing', 'breathe', 'stroke', 'seizure', 'overdose', 'cpr', 'choking', 'broken', 'fall', 'fell', 'injured', 'cardiac', 'pulse', 'pale', 'dizzy', 'pregnant', 'hurt', 'pain', 'sick', 'crash', 'accident', 'collision', 'rtc'] },
+  coastguard:{ icon: '⚓', name: 'HM Coastguard',   keywords: ['drowning', 'boat', 'sea', 'cliff', 'beach', 'tide', 'swept', 'water', 'overboard', 'swim', 'coast'] },
+};
+
+const PRIORITY = {
+  1: { kws: ['unconscious', 'not breathing', 'no pulse', 'cardiac', 'severe bleeding', 'active threat', 'weapon', 'spreading fire', 'cpr', 'overdose', 'collapsed', 'choking', 'stab', 'shot'], label: 'CATEGORY 1 — IMMEDIATE' },
+  2: { kws: ['injured', 'bleeding', 'trapped', 'chest pain', 'broken', 'difficulty breathing', 'pain', 'fight', 'crash', 'accident', 'fire'], label: 'CATEGORY 2 — URGENT' },
+  3: { kws: ['minor', 'suspicious', 'walk-in', 'non-urgent', 'concern'], label: 'CATEGORY 3 — ROUTINE' },
+};
+
+function analyse(text) {
+  const lower = text.toLowerCase();
+  const matched = {}; const scores = {};
+  for (const [k, def] of Object.entries(SERVICES)) {
+    matched[k] = [];
+    for (const kw of def.keywords) if (lower.includes(kw)) matched[k].push(kw);
+    scores[k] = matched[k].length;
+  }
+  const total = Object.values(scores).reduce((a,b)=>a+b,0);
+  const confidence = {};
+  for (const k of Object.keys(scores)) {
+    confidence[k] = total > 0 ? Math.round((scores[k] / total) * 100) : 0;
+  }
+  let priority = null;
+  if (PRIORITY[1].kws.some(kw => lower.includes(kw))) priority = 1;
+  else if (PRIORITY[2].kws.some(kw => lower.includes(kw))) priority = 2;
+  else if (PRIORITY[3].kws.some(kw => lower.includes(kw))) priority = 3;
+  return { matched, scores, confidence, priority };
+}
+
+// --- Unit catalogue (mock) ---
+const UNITS = [
+  { id: 'TANGO-12', service: 'police',     name: 'Police Tango-12',      station: 'Manvers Street',          dist: 1.2 },
+  { id: 'TANGO-04', service: 'police',     name: 'Police Tango-04',      station: 'Keynsham Police',         dist: 5.8 },
+  { id: 'FIRE-07',  service: 'fire',       name: 'Fire Engine Foxtrot-7',station: 'Bath Central Fire',       dist: 1.8 },
+  { id: 'FIRE-12',  service: 'fire',       name: 'Aerial Ladder Foxtrot-12', station: 'Bath Central Fire',   dist: 1.9 },
+  { id: 'ALPHA-3',  service: 'ambulance',  name: 'Ambulance Alpha-3',    station: 'Royal United Hospital',   dist: 2.4 },
+  { id: 'BRAVO-1',  service: 'ambulance',  name: 'Ambulance Bravo-1',    station: 'Keynsham Ambulance',      dist: 5.1 },
+  { id: 'HELI-AAW', service: 'air',        name: 'Air Ambulance Wessex', station: 'Henstridge Airfield',     dist: 18.0 },
+  { id: 'CHARLIE-2',service: 'coastguard', name: 'Coastguard Charlie-2', station: 'Avonmouth',               dist: 24.7 },
+];
+function eta(u) { const speed = u.service === 'air' ? 200 : 38; return Math.max(1, Math.round((u.dist / speed) * 60)); }
+
+// --- State ---
+let state = {
+  caller: 'Mobile · +44 7700 900 471',
+  incidentDefault: 'Road traffic collision',
+  geo: null,
+  transcript: [], // {who, text, kind, time}
+  callStart: null,
+};
+let unitStatuses = {}; // id -> 'standby' | 'dispatched' | 'on-scene'
+let claudeResult = null;      // last successful Claude analysis
+let aiDebounceTimer = null;   // pending analysis fetch
+let aiInFlight = false;       // request currently open
+let aiMode = 'keyword';       // 'keyword' | 'claude' | 'analysing' | 'error'
+const AI_DEBOUNCE_MS = 3000;
+let unitResponderWindows = {}; // id -> window ref
+let dashboard = window.opener;
+
+// ---- AI status pill ----
+function setAiMode(mode, detail) {
+  aiMode = mode;
+  const pill = document.getElementById('ai-pill');
+  const text = document.getElementById('ai-status-text');
+  pill.classList.remove('claude', 'analysing', 'keyword', 'error');
+  pill.classList.add(mode);
+  const labels = {
+    claude: 'AI: Claude Sonnet 5',
+    analysing: 'AI: analysing…',
+    keyword: 'AI: keyword fallback',
+    error: 'AI: error — ' + (detail || 'retrying'),
+  };
+  text.textContent = labels[mode] || 'AI: idle';
+  const label = document.getElementById('ai-source-label');
+  if (label) {
+    label.textContent = mode === 'claude'
+      ? 'Live analysis by Claude Sonnet 5'
+      : (mode === 'analysing' ? 'Claude Sonnet 5 is thinking…' : 'Keyword fallback (server not calling Claude)');
+  }
+}
+
+// ---- Debounced trigger and fetch ----
+function scheduleAiAnalysis() {
+  if (aiDebounceTimer) clearTimeout(aiDebounceTimer);
+  aiDebounceTimer = setTimeout(runAiAnalysis, AI_DEBOUNCE_MS);
+}
+
+async function runAiAnalysis() {
+  if (aiInFlight) return;
+  if (!state.transcript || state.transcript.length === 0) return;
+  aiInFlight = true;
+  setAiMode('analysing');
+  try {
+    const transcriptText = state.transcript
+      .map(m => `[${m.who}] ${m.text}`)
+      .join('\n');
+    const r = await fetch('/api/analyse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        transcript: transcriptText,
+        geo: state.geo,
+      }),
+    });
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      throw new Error(body.error || ('HTTP ' + r.status));
+    }
+    const data = await r.json();
+    claudeResult = data.result;
+    setAiMode('claude');
+    renderAI();
+  } catch (err) {
+    console.warn('AI analysis failed:', err.message);
+    claudeResult = null;
+    setAiMode(err.message.includes('not configured') ? 'keyword' : 'error', err.message.slice(0, 40));
+    renderAI(); // fall back to keyword
+  } finally {
+    aiInFlight = false;
+  }
+}
+
+// ---- Render Claude structured output into the existing UI slots ----
+function renderClaudeResult() {
+  const r = claudeResult;
+  if (!r) return;
+
+  // Service cards
+  const el = document.getElementById('ai-services');
+  el.innerHTML = '';
+  const services = [...r.services].sort((a, b) => b.confidence - a.confidence);
+  const topKey = services[0] && services[0].confidence > 0 ? services[0].key : null;
+  services.forEach(svc => {
+    const def = SERVICES[svc.key] || { icon: '•', name: svc.name };
+    const card = document.createElement('div');
+    card.className = 'service ' + svc.key + (svc.key === topKey ? ' recommended' : '');
+    if (svc.key === topKey) {
+      const tag = document.createElement('div');
+      tag.className = 'reco-tag';
+      tag.textContent = 'RECOMMENDED';
+      card.appendChild(tag);
+    }
+    const head = document.createElement('div');
+    head.className = 'head';
+    head.innerHTML = `<div class="icon">${def.icon}</div><div class="name">${def.name}</div><div class="conf">${svc.confidence}%</div>`;
+    card.appendChild(head);
+    const bar = document.createElement('div');
+    bar.className = 'conf-bar';
+    bar.innerHTML = `<div class="fill" style="width:${svc.confidence}%"></div>`;
+    card.appendChild(bar);
+    if (svc.reasoning) {
+      const reasoning = document.createElement('div');
+      reasoning.className = 'reasoning';
+      reasoning.textContent = svc.reasoning;
+      card.appendChild(reasoning);
+    }
+    if (svc.keyIndicators && svc.keyIndicators.length) {
+      const kws = document.createElement('div');
+      kws.className = 'keywords';
+      svc.keyIndicators.forEach(kw => {
+        const s = document.createElement('span');
+        s.className = 'kw matched';
+        s.textContent = kw;
+        kws.appendChild(s);
+      });
+      card.appendChild(kws);
+    }
+    el.appendChild(card);
+  });
+
+  // Incident type header (from top service)
+  const incidentMap = { police: 'Crime / public-order incident', fire: 'Fire / rescue incident', ambulance: 'Medical emergency', coastguard: 'Maritime / coastal emergency' };
+  document.getElementById('incident-type').textContent = topKey ? (incidentMap[topKey] + ' (AI)') : state.incidentDefault;
+
+  // Priority
+  document.getElementById('priority').textContent = r.priority.label;
+
+  // Reasoning summary
+  document.getElementById('ai-summary').textContent = r.priority.justification || '';
+
+  // Follow-up questions
+  const fq = document.getElementById('ai-followups');
+  fq.innerHTML = '';
+  if (r.followUpQuestions && r.followUpQuestions.length) {
+    r.followUpQuestions.forEach(q => {
+      const li = document.createElement('li'); li.textContent = q; fq.appendChild(li);
+    });
+  } else {
+    const li = document.createElement('li'); li.className = 'ai-empty'; li.textContent = 'No follow-ups suggested.'; fq.appendChild(li);
+  }
+
+  // Pre-arrival instructions
+  const pa = document.getElementById('ai-prearrival');
+  pa.innerHTML = '';
+  if (r.preArrivalInstructions && r.preArrivalInstructions.length) {
+    r.preArrivalInstructions.forEach(inst => {
+      const li = document.createElement('li'); li.textContent = inst; pa.appendChild(li);
+    });
+  } else {
+    const li = document.createElement('li'); li.className = 'ai-empty'; li.textContent = 'None recommended.'; pa.appendChild(li);
+  }
+
+  // Risk flags
+  const rf = document.getElementById('ai-risks');
+  rf.innerHTML = '';
+  if (r.riskFlags && r.riskFlags.length) {
+    r.riskFlags.forEach(flag => {
+      const span = document.createElement('span'); span.className = 'risk'; span.textContent = flag; rf.appendChild(span);
+    });
+  } else {
+    const span = document.createElement('span'); span.className = 'risk empty'; span.textContent = 'none flagged'; rf.appendChild(span);
+  }
+
+  // Handover brief (only overwrite if the user hasn't edited it)
+  const ta = document.getElementById('handover-text');
+  if (!ta.dataset.userEdited) {
+    ta.value = buildHandoverText(topKey, r);
+  }
+
+  // Recompute units so the recommended service floats to the top
+  renderUnits(topKey);
+}
+
+function buildHandoverText(topKey, r) {
+  const lines = [];
+  lines.push('=== 99NOW INCIDENT HANDOVER (AI-assisted) ===');
+  lines.push('Time:        ' + new Date().toISOString());
+  lines.push('Caller:      ' + state.caller);
+  lines.push('Incident:    ' + document.getElementById('incident-type').textContent);
+  lines.push('Priority:    ' + r.priority.label);
+  lines.push('Duration:    ' + document.getElementById('duration').textContent);
+  if (state.geo) {
+    lines.push('Location:    lat ' + state.geo.lat.toFixed(5) + ', lon ' + state.geo.lon.toFixed(5) + ' (±' + Math.round(state.geo.accuracy||0) + 'm)');
+  }
+  lines.push('');
+  lines.push('BRIEF:');
+  lines.push('  ' + (r.handoverBrief || '—'));
+  if (r.riskFlags && r.riskFlags.length) {
+    lines.push('');
+    lines.push('RISK FLAGS: ' + r.riskFlags.join(', '));
+  }
+  if (r.preArrivalInstructions && r.preArrivalInstructions.length) {
+    lines.push('');
+    lines.push('PRE-ARRIVAL INSTRUCTIONS GIVEN:');
+    r.preArrivalInstructions.forEach(i => lines.push('  • ' + i));
+  }
+  lines.push('');
+  lines.push('DISPATCHED UNITS:');
+  Object.entries(unitStatuses).forEach(([id, st]) => {
+    if (st !== 'standby') {
+      const u = UNITS.find(u => u.id === id);
+      if (u) lines.push('  ' + u.name + ' — ' + st.toUpperCase() + ' — ETA ' + eta(u) + 'min');
+    }
+  });
+  return lines.join('\n');
+}
+
+function renderAI() {
+  // If Claude has produced a result, use it. Otherwise use the keyword fallback.
+  if (claudeResult) { renderClaudeResult(); return; }
+  const allText = state.transcript.map(m => m.text).join(' ');
+  const a = analyse(allText);
+  // pick the recommended service (highest confidence, must have at least 1 keyword)
+  let recommended = null, top = 0;
+  for (const k of Object.keys(SERVICES)) {
+    if (a.scores[k] > top) { top = a.scores[k]; recommended = k; }
+  }
+
+  // Render service cards
+  const el = document.getElementById('ai-services');
+  el.innerHTML = '';
+  for (const [k, def] of Object.entries(SERVICES)) {
+    const card = document.createElement('div');
+    card.className = 'service ' + k + (k === recommended ? ' recommended' : '');
+    if (k === recommended) {
+      const tag = document.createElement('div'); tag.className = 'reco-tag'; tag.textContent = 'RECOMMENDED'; card.appendChild(tag);
+    }
+    const head = document.createElement('div'); head.className = 'head';
+    head.innerHTML = `<div class="icon">${def.icon}</div><div class="name">${def.name}</div><div class="conf">${a.confidence[k]}%</div>`;
+    card.appendChild(head);
+    const bar = document.createElement('div'); bar.className = 'conf-bar';
+    bar.innerHTML = `<div class="fill" style="width:${a.confidence[k]}%"></div>`;
+    card.appendChild(bar);
+    if (a.matched[k].length) {
+      const kws = document.createElement('div'); kws.className = 'keywords';
+      a.matched[k].forEach(kw => {
+        const k2 = document.createElement('span'); k2.className = 'kw matched'; k2.textContent = kw;
+        kws.appendChild(k2);
+      });
+      card.appendChild(kws);
+    }
+    el.appendChild(card);
+  }
+
+  // Update incident type & priority based on AI
+  if (recommended) {
+    const incidentMap = { police: 'Crime in progress', fire: 'Fire incident', ambulance: 'Medical emergency', coastguard: 'Maritime / coastal emergency' };
+    document.getElementById('incident-type').textContent = incidentMap[recommended] + ' (AI)';
+  } else {
+    document.getElementById('incident-type').textContent = state.incidentDefault;
+  }
+  if (a.priority) {
+    document.getElementById('priority').textContent = PRIORITY[a.priority].label;
+  } else {
+    document.getElementById('priority').textContent = 'CATEGORY 2 — URGENT';
+  }
+
+  // Summary text
+  const summaryEl = document.getElementById('ai-summary');
+  if (allText.trim().length === 0) {
+    summaryEl.textContent = 'Awaiting caller input. The AI will analyse the live transcript for incident keywords and recommend the appropriate emergency services with confidence scores.';
+  } else {
+    const services = Object.keys(SERVICES).filter(k => a.scores[k] > 0)
+      .sort((a2,b2) => a.scores[b2] - a.scores[a2])
+      .map(k => `<strong>${SERVICES[k].name}</strong> (${a.confidence[k]}%)`);
+    const prioLabel = a.priority ? PRIORITY[a.priority].label : 'Category 2 — Urgent';
+    summaryEl.innerHTML = `Based on ${state.transcript.length} transcript message(s), the system suggests dispatching ${services.length ? services.join(', ') : '—'}. Recommended priority: <strong>${prioLabel}</strong>. Review the unit list below and forward the live video feed to the responding teams.`;
+  }
+
+  // refresh handover
+  renderHandover(a, recommended);
+  // refresh units (recommended highlight)
+  renderUnits(recommended);
+}
+
+function renderUnits(recommended) {
+  const el = document.getElementById('units-list');
+  el.innerHTML = '';
+  // sort: recommended service first, then by ETA
+  const sorted = [...UNITS].sort((a,b) => {
+    const ar = a.service === recommended ? 0 : 1;
+    const br = b.service === recommended ? 0 : 1;
+    if (ar !== br) return ar - br;
+    return eta(a) - eta(b);
+  });
+  sorted.forEach(u => {
+    const status = unitStatuses[u.id] || 'standby';
+    const item = document.createElement('div');
+    item.className = 'unit ' + u.service + (status === 'dispatched' ? ' dispatched' : '') + (status === 'on-scene' ? ' on-scene' : '');
+    const dispatchedTag = status !== 'standby' ? `<div class="status-tag">${status.toUpperCase()}</div>` : '';
+    item.innerHTML = `
+      <div class="icon">${SERVICES[u.service === 'air' ? 'ambulance' : u.service]?.icon || '🚑'}</div>
+      <div class="meta">
+        <div class="name">${u.name}</div>
+        <div class="det">${u.station} · ${u.dist.toFixed(1)} km</div>
+        <div class="eta">ETA ${eta(u)} min</div>
+        ${dispatchedTag}
+      </div>
+      <div class="actions">
+        <button data-action="dispatch" data-id="${u.id}" ${status !== 'standby' ? 'disabled' : ''}>${status === 'standby' ? 'Dispatch' : 'Dispatched'}</button>
+        <button data-action="forward" data-id="${u.id}" class="send-video">Send Video</button>
+      </div>
+    `;
+    item.querySelector('[data-action=dispatch]').onclick = () => dispatchUnit(u);
+    item.querySelector('[data-action=forward]').onclick = () => forwardVideoToUnit(u);
+    el.appendChild(item);
+  });
+}
+
+function renderHandover(a, recommended) {
+  const lines = [];
+  lines.push('=== 99NOW INCIDENT HANDOVER ===');
+  lines.push('Time:        ' + new Date().toISOString());
+  lines.push('Caller:      ' + state.caller);
+  lines.push('Incident:    ' + (document.getElementById('incident-type').textContent || state.incidentDefault));
+  lines.push('Priority:    ' + document.getElementById('priority').textContent);
+  if (state.geo) {
+    lines.push('Location:    lat ' + state.geo.lat.toFixed(5) + ', lon ' + state.geo.lon.toFixed(5) + ' (±' + Math.round(state.geo.accuracy||0) + 'm)');
+  }
+  lines.push('Duration:    ' + document.getElementById('duration').textContent);
+  lines.push('');
+  lines.push('AI-DETECTED KEYWORDS:');
+  for (const [k, def] of Object.entries(SERVICES)) {
+    if (a.matched[k].length) lines.push('  ' + def.name + ': ' + a.matched[k].join(', '));
+  }
+  lines.push('');
+  lines.push('RECENT TRANSCRIPT:');
+  state.transcript.slice(-8).forEach(m => {
+    lines.push('  [' + m.who + '] ' + m.text);
+  });
+  lines.push('');
+  lines.push('DISPATCHED UNITS:');
+  Object.entries(unitStatuses).forEach(([id, st]) => {
+    if (st !== 'standby') {
+      const u = UNITS.find(u => u.id === id);
+      if (u) lines.push('  ' + u.name + ' — ' + st.toUpperCase() + ' — ETA ' + eta(u) + 'min');
+    }
+  });
+  const ta = document.getElementById('handover-text');
+  // only update if user hasn't been editing — simple check: if textarea was set programmatically last
+  if (!ta.dataset.userEdited) {
+    ta.value = lines.join('\n');
+  }
+}
+
+function dispatchUnit(u) {
+  unitStatuses[u.id] = 'dispatched';
+  // simulate on-scene arrival after ETA*200ms (faster than real for demo)
+  setTimeout(() => {
+    unitStatuses[u.id] = 'on-scene';
+    renderAI();
+  }, eta(u) * 800);
+  renderAI();
+}
+
+function forwardVideoToUnit(u) {
+  // build the responder URL
+  const params = new URLSearchParams({
+    unit: u.name,
+    incident: document.getElementById('incident-type').textContent,
+    priority: document.getElementById('priority').textContent,
+  });
+  if (state.geo) {
+    params.set('lat', state.geo.lat);
+    params.set('lon', state.geo.lon);
+    params.set('acc', state.geo.accuracy || 0);
+  }
+  const url = `/responder?${params.toString()}`;
+  const w = window.open(url, `responder-${u.id}`, 'width=900,height=700');
+  unitResponderWindows[u.id] = w;
+  // mark dispatched if not already
+  if (!unitStatuses[u.id] || unitStatuses[u.id] === 'standby') {
+    unitStatuses[u.id] = 'dispatched';
+    setTimeout(() => { unitStatuses[u.id] = 'on-scene'; renderAI(); }, eta(u) * 800);
+  }
+  renderAI();
+}
+
+// --- Receive state from dashboard via postMessage ---
+window.addEventListener('message', (e) => {
+  if (!e.data || typeof e.data !== 'object') return;
+  const m = e.data;
+  if (m.type === 'state') {
+    Object.assign(state, m.payload);
+    applyState();
+    if (state.transcript && state.transcript.length) scheduleAiAnalysis();
+  } else if (m.type === 'transcript-add') {
+    state.transcript.push(m.payload);
+    renderAI();
+    scheduleAiAnalysis();
+  } else if (m.type === 'geo') {
+    state.geo = m.payload;
+    applyState();
+  } else if (m.type === 'call-start') {
+    state.callStart = m.payload.t;
+    startTimer();
+  } else if (m.type === 'call-end') {
+    stopTimer();
+  } else if (m.type === 'stream') {
+    // Browser cannot transfer MediaStream via postMessage; we read it via opener instead
+    mirrorVideoFromDashboard();
+  }
+});
+
+function applyState() {
+  document.getElementById('caller-info').textContent = state.caller;
+  if (state.geo) {
+    document.getElementById('location').textContent = `Approx. lat ${state.geo.lat.toFixed(5)}, lon ${state.geo.lon.toFixed(5)}`;
+    document.getElementById('coords').textContent = `${state.geo.lat.toFixed(5)}, ${state.geo.lon.toFixed(5)} ±${Math.round(state.geo.accuracy||0)}m`;
+  }
+  renderAI();
+}
+
+let timerInterval = null;
+function startTimer() {
+  stopTimer();
+  timerInterval = setInterval(() => {
+    if (!state.callStart) return;
+    const s = Math.floor((Date.now() - state.callStart) / 1000);
+    const mm = String(Math.floor(s / 60)).padStart(2, '0');
+    const ss = String(s % 60).padStart(2, '0');
+    document.getElementById('duration').textContent = `${mm}:${ss}`;
+  }, 500);
+}
+function stopTimer() { if (timerInterval) clearInterval(timerInterval); timerInterval = null; }
+
+function mirrorVideoFromDashboard() {
+  try {
+    const src = dashboard && dashboard.document.getElementById('v')?.srcObject;
+    if (src) {
+      const v = document.getElementById('v');
+      v.srcObject = src;
+      v.play().catch(()=>{});
+      document.getElementById('vplaceholder').style.display = 'none';
+    }
+  } catch (e) {
+    console.warn('cannot mirror video', e);
+  }
+}
+
+// Handover actions
+document.getElementById('handover-text').addEventListener('input', (e) => {
+  e.target.dataset.userEdited = '1';
+});
+document.getElementById('copy-handover').onclick = async () => {
+  await navigator.clipboard.writeText(document.getElementById('handover-text').value);
+  const b = document.getElementById('copy-handover'); const old = b.textContent;
+  b.textContent = 'Copied!'; setTimeout(() => b.textContent = old, 1200);
+};
+document.getElementById('print-handover').onclick = () => {
+  const text = document.getElementById('handover-text').value;
+  const w = window.open('', '', 'width=600,height=800');
+  w.document.write(`<pre style="font-family:ui-monospace,monospace;white-space:pre-wrap;padding:20px;">${text.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</pre>`);
+  w.print();
+};
+
+// Tell the dashboard we're ready
+if (dashboard) {
+  dashboard.postMessage({ type: 'dispatch-ready' }, location.origin);
+}
+// Initial render with empty state
+setAiMode('keyword');
+renderAI();
+
+// Try mirroring video periodically (cheap, in case the track wasn't ready when we opened)
+setInterval(mirrorVideoFromDashboard, 1500);
+</script>
+</body>
+</html>
